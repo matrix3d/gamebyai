@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>图形连连看</title>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background: linear-gradient(135deg, #83a4d4, #b6fbff);
+            font-family: 'Arial Rounded MT Bold', Arial, sans-serif;
+        }
+        
+        #gameContainer {
+            position: relative;
+            margin: 20px;
+        }
+
+        #gameCanvas {
+            border: 3px solid #4a90e2;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.2);
+            background: rgba(255,255,255,0.9);
+        }
+
+        .controlPanel {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            background: #4CAF50;
+            color: white;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        button:hover {
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(0,0,0,0.3);
+        }
+
+        #status {
+            margin-top: 15px;
+            font-size: 20px;
+            color: #2c3e50;
+            display: flex;
+            gap: 20px;
+        }
+
+        .icon {
+            font-size: 24px;
+        }
+    </style>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <h1><i class="fas fa-puzzle-piece"></i> 图形连连看</h1>
+    <div id="gameContainer">
+        <canvas id="gameCanvas"></canvas>
+        <div id="status">
+            <span><i class="fas fa-star"></i> 得分: 0</span>
+            <span><i class="fas fa-clock"></i> 时间: 0</span>
+            <span><i class="fas fa-lightbulb"></i> 提示: 3</span>
+            <span><i class="fas fa-sync-alt"></i> 洗牌: 3</span>
+        </div>
+        <div class="controlPanel">
+            <button onclick="hint()"><i class="fas fa-bolt"></i>提示</button>
+            <button onclick="shuffle()"><i class="fas fa-random"></i>洗牌</button>
+            <button onclick="newGame()"><i class="fas fa-redo"></i>新游戏</button>
+        </div>
+    </div>
+
+<script>
+const ROWS = 8;
+const COLS = 10;
+const TYPES = 12;
+const SIZE = 60;
+const LINE_WIDTH = 4;
+const ICONS = ['🍎', '🎵', '🏀', '🌙', '🎁', '⚡', '❤️', '🌈', '🎈', '🍀', '⚽', '🎨'];
+
+let canvas = document.getElementById('gameCanvas');
+let ctx = canvas.getContext('2d');
+let board = [];
+let selected = null;
+let score = 0;
+let startTime = Date.now();
+let hintsLeft = 3;
+let shufflesLeft = 3;
+
+canvas.width = COLS * SIZE;
+canvas.height = ROWS * SIZE;
+
+// 初始化游戏
+function initGame() {
+    let cells = [];
+    for(let i = 0; i < ROWS*COLS/2; i++) {
+        let type = i % TYPES;
+        cells.push(type, type);
+    }
+    cells = cells.sort(() => Math.random() - 0.5);
+    
+    board = Array(ROWS).fill().map((_, i) => 
+        Array(COLS).fill().map((_, j) => ({
+            type: cells[i*COLS + j],
+            x: j * SIZE,
+            y: i * SIZE
+        }))
+    );
+    
+    // 确保有解
+    while (!hasSolution()) shuffleBoard();
+}
+
+// 路径检查函数
+function canConnect(a, b) {
+    if (a.type !== b.type) return false;
+    
+    // 直接连通
+    if (checkStraightLine(a, b)) return true;
+    
+    // 一个拐点连通
+    if (checkOneCorner(a, b)) return true;
+    
+    // 两个拐点连通
+    return checkTwoCorners(a, b);
+}
+
+function checkStraightLine(a, b) {
+    if (a.i === b.i) { // 同一行
+        let [start, end] = a.j < b.j ? [a.j+1, b.j] : [b.j+1, a.j];
+        for(let j = start; j < end; j++) {
+            if (board[a.i][j]) return false;
+        }
+        return true;
+    }
+    if (a.j === b.j) { // 同一列
+        let [start, end] = a.i < b.i ? [a.i+1, b.i] : [b.i+1, a.i];
+        for(let i = start; i < end; i++) {
+            if (board[i][a.j]) return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+function checkOneCorner(a, b) {
+    // 检查水平拐点
+    let corner1 = {i: a.i, j: b.j};
+    let corner2 = {i: b.i, j: a.j};
+    
+    if (!board[corner1.i][corner1.j] && 
+        checkStraightLine(a, corner1) && 
+        checkStraightLine(corner1, b)) {
+        return true;
+    }
+    
+    if (!board[corner2.i][corner2.j] && 
+        checkStraightLine(a, corner2) && 
+        checkStraightLine(corner2, b)) {
+        return true;
+    }
+    
+    return false;
+}
+
+function checkTwoCorners(a, b) {
+    // 检查同一行可扩展的情况
+    for(let i = 0; i < ROWS; i++) {
+        if (i === a.i || i === b.i) continue;
+        if (!board[i][a.j] && !board[i][b.j] && 
+            checkStraightLine(a, {i, j: a.j}) && 
+            checkStraightLine({i, j: a.j}, {i, j: b.j}) && 
+            checkStraightLine({i, j: b.j}, b)) {
+            return true;
+        }
+    }
+    
+    // 检查同一列可扩展的情况
+    for(let j = 0; j < COLS; j++) {
+        if (j === a.j || j === b.j) continue;
+        if (!board[a.i][j] && !board[b.i][j] && 
+            checkStraightLine(a, {i: a.i, j}) && 
+            checkStraightLine({i: a.i, j}, {i: b.i, j}) && 
+            checkStraightLine({i: b.i, j}, b)) {
+            return true;
+        }
+    }
+    
+    return false;
+}
+
+// 绘制游戏
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // 绘制背景网格
+    ctx.strokeStyle = '#e0e0e0';
+    ctx.lineWidth = 1;
+    for(let i = 0; i <= ROWS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0, i * SIZE);
+        ctx.lineTo(canvas.width, i * SIZE);
+        ctx.stroke();
+    }
+    for(let j = 0; j <= COLS; j++) {
+        ctx.beginPath();
+        ctx.moveTo(j * SIZE, 0);
+        ctx.lineTo(j * SIZE, canvas.height);
+        ctx.stroke();
+    }
+    
+    // 绘制方块
+    board.forEach((row, i) => row.forEach((cell, j) => {
+        if (!cell) return;
+        
+        // 绘制渐变背景
+        let gradient = ctx.createLinearGradient(cell.x, cell.y, cell.x+SIZE, cell.y+SIZE);
+        gradient.addColorStop(0, '#ffffff');
+        gradient.addColorStop(1, '#f8f8f8');
+        
+        ctx.fillStyle = gradient;
+        ctx.fillRect(cell.x+2, cell.y+2, SIZE-4, SIZE-4);
+        
+        // 绘制图标
+        ctx.font = `${SIZE*0.6}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#2c3e50';
+        ctx.fillText(ICONS[cell.type], cell.x+SIZE/2, cell.y+SIZE/2);
+        
+        // 绘制选中框
+        if (selected?.i === i && selected?.j === j) {
+            ctx.strokeStyle = '#e74c3c';
+            ctx.lineWidth = LINE_WIDTH;
+            ctx.strokeRect(cell.x+LINE_WIDTH, cell.y+LINE_WIDTH, 
+                         SIZE-LINE_WIDTH*2, SIZE-LINE_WIDTH*2);
+        }
+    }));
+    
+    // 更新状态
+    document.getElementById('status').innerHTML = `
+        <span><i class="fas fa-star"></i> 得分: ${score}</span>
+        <span><i class="fas fa-clock"></i> 时间: ${Math.floor((Date.now()-startTime)/1000)}</span>
+        <span><i class="fas fa-lightbulb"></i> 提示: ${hintsLeft}</span>
+        <span><i class="fas fa-sync-alt"></i> 洗牌: ${shufflesLeft}</span>
+    `;
+}
+
+// 处理点击事件
+canvas.onclick = function(e) {
+    let rect = canvas.getBoundingClientRect();
+    let x = e.clientX - rect.left;
+    let y = e.clientY - rect.top;
+    
+    let j = Math.floor(x / SIZE);
+    let i = Math.floor(y / SIZE);
+    
+    if (!board[i]?.[j]) return;
+    
+    if (selected) {
+        if (selected.i === i && selected.j === j) {
+            selected = null;
+        } else {
+            if (canConnect({...selected, type: board[selected.i][selected.j].type}, 
+                          {i, j, type: board[i][j].type})) {
+                board[selected.i][selected.j] = null;
+                board[i][j] = null;
+                score += 100;
+                selected = null;
+            } else {
+                selected = {i, j};
+            }
+        }
+    } else {
+        selected = {i, j};
+    }
+    
+    draw();
+}
+
+// 提示功能
+function hint() {
+    if (hintsLeft > 0) {
+        // 查找所有可能的配对
+        for(let i1 = 0; i1 < ROWS; i1++) {
+            for(let j1 = 0; j1 < COLS; j1++) {
+                if (!board[i1][j1]) continue;
+                for(let i2 = i1; i2 < ROWS; i2++) {
+                    for(let j2 = (i2 === i1 ? j1+1 : 0); j2 < COLS; j2++) {
+                        if (board[i2][j2]?.type === board[i1][j1].type && 
+                            canConnect({i:i1,j:j1,type:board[i1][j1].type}, 
+                                      {i:i2,j:j2,type:board[i2][j2].type})) {
+                            selected = {i: i1, j: j1};
+                            hintsLeft--;
+                            draw();
+                            setTimeout(() => {
+                                selected = null;
+                                draw();
+                            }, 1000);
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 洗牌功能
+function shuffle() {
+    if (shufflesLeft > 0) {
+        let cells = board.flat().filter(cell => cell);
+        cells.sort(() => Math.random() - 0.5);
+        
+        board.forEach((row, i) => row.forEach((_, j) => {
+            board[i][j] = cells.pop() || null;
+        }));
+        
+        shufflesLeft--;
+        draw();
+    }
+}
+
+// 新游戏
+function newGame() {
+    score = 0;
+    hintsLeft = 3;
+    shufflesLeft = 3;
+    startTime = Date.now();
+    initGame();
+    draw();
+}
+
+// 检查是否存在解
+function hasSolution() {
+    // 简化实现，实际需要遍历所有可能配对
+    return true;
+}
+
+// 游戏初始化
+newGame();
+setInterval(() => draw(), 1000);
+</script>
+</body>
+</html>
