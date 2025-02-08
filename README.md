@@ -1,3 +1,3 @@
 # html5gameByAI
 
-https://matrix3d.github.io/gamebyai/saolei.html
+<a href="https://matrix3d.github.io/gamebyai/saolei.html">扫雷</a> 
