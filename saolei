@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>扫雷游戏 by chatg</title>
+  <style>
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(10, 30px);
+      grid-template-rows: repeat(10, 30px);
+      gap: 2px;
+    }
+    .cell {
+      width: 30px;
+      height: 30px;
+      background-color: lightgray;
+      border: 1px solid #ccc;
+      text-align: center;
+      line-height: 30px;
+      font-weight: bold;
+      cursor: pointer;
+    }
+    .flag {
+      background-color: lightblue;
+    }
+    .revealed {
+      background-color: white;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    const gridSize = 10;
+    const numMines = 20;
+    const grid = document.getElementById('grid');
+    const cells = [];
+    const mineField = Array(gridSize).fill(null).map(() => Array(gridSize).fill(0));
+    let revealedCount = 0;
+
+    // Initialize grid with mines and numbers
+    function initializeGrid() {
+      // Randomly place mines
+      let minesPlaced = 0;
+      while (minesPlaced < numMines) {
+        const x = Math.floor(Math.random() * gridSize);
+        const y = Math.floor(Math.random() * gridSize);
+        if (mineField[x][y] === 0) {
+          mineField[x][y] = -1; // -1 represents a mine
+          minesPlaced++;
+        }
+      }
+
+      // Calculate numbers for neighboring cells
+      for (let i = 0; i < gridSize; i++) {
+        for (let j = 0; j < gridSize; j++) {
+          if (mineField[i][j] === -1) continue; // Skip mines
+          let mineCount = 0;
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              const nx = i + dx;
+              const ny = j + dy;
+              if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize && mineField[nx][ny] === -1) {
+                mineCount++;
+              }
+            }
+          }
+          mineField[i][j] = mineCount;
+        }
+      }
+    }
+
+    // Create grid cells
+    function createGrid() {
+      for (let x = 0; x < gridSize; x++) {
+        for (let y = 0; y < gridSize; y++) {
+          const cell = document.createElement('div');
+          cell.classList.add('cell');
+          cell.dataset.x = x;
+          cell.dataset.y = y;
+          grid.appendChild(cell);
+          cells.push(cell);
+
+          // Left click (reveal cell)
+          cell.addEventListener('click', () => revealCell(x, y));
+
+          // Right click (flag cell)
+          cell.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            toggleFlag(x, y);
+          });
+
+          // Middle click (auto reveal surrounding cells)
+          cell.addEventListener('mousedown', (e) => {
+            if (e.button === 1) { // middle mouse button
+              e.preventDefault();
+              autoReveal(x, y);
+            }
+          });
+        }
+      }
+    }
+
+    // Reveal the cell
+    function revealCell(x, y) {
+      const index = x * gridSize + y;
+      const cell = cells[index];
+
+      if (cell.classList.contains('revealed') || cell.classList.contains('flag')) return;
+
+      cell.classList.add('revealed');
+      revealedCount++;
+
+      if (mineField[x][y] === -1) {
+        alert('Game Over!');
+        revealAll();
+        return;
+      }
+
+      cell.textContent = mineField[x][y] > 0 ? mineField[x][y] : '';
+      if (mineField[x][y] === 0) {
+        // If the cell is 0, reveal surrounding cells recursively
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
+              revealCell(nx, ny);
+            }
+          }
+        }
+      }
+    }
+
+    // Toggle flag on cell
+    function toggleFlag(x, y) {
+      const index = x * gridSize + y;
+      const cell = cells[index];
+      if (cell.classList.contains('revealed')) return;
+
+      if (cell.classList.contains('flag')) {
+        cell.classList.remove('flag');
+        cell.textContent = '';
+      } else {
+        cell.classList.add('flag');
+        cell.textContent = '🚩';
+      }
+    }
+
+    // Automatically reveal surrounding cells when the middle button is pressed
+    function autoReveal(x, y) {
+      const index = x * gridSize + y;
+      const cell = cells[index];
+      if (mineField[x][y] === 0) {
+        // Check if the cell is a number and has the same number of flags around it
+        let flaggedCount = 0;
+        for (let dx = -1; dx <= 1; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            const nx = x + dx;
+            const ny = y + dy;
+            const neighborCell = cells[nx * gridSize + ny];
+            if (neighborCell && neighborCell.classList.contains('flag')) {
+              flaggedCount++;
+            }
+          }
+        }
+
+        if (flaggedCount === mineField[x][y]) {
+          // If the number of flags around matches the number, reveal the neighbors
+          for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+              const nx = x + dx;
+              const ny = y + dy;
+              if (nx >= 0 && nx < gridSize && ny >= 0 && ny < gridSize) {
+                revealCell(nx, ny);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Reveal all cells (game over scenario)
+    function revealAll() {
+      cells.forEach((cell, index) => {
+        const x = Math.floor(index / gridSize);
+        const y = index % gridSize;
+        if (mineField[x][y] === -1) {
+          cell.textContent = '💣';
+        } else {
+          cell.textContent = mineField[x][y] || '';
+        }
+        cell.classList.add('revealed');
+      });
+    }
+
+    // Initialize and create the grid
+    initializeGrid();
+    createGrid();
+  </script>
+</body>
+</html>
