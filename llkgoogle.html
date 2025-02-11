@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>连连看</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        background-color: #f0f0f0;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        min-height: 100vh;
+        margin: 0;
+    }
+    
+    .game-container {
+        background-color: #fff;
+        border-radius: 8px;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        padding: 20px;
+        user-select: none; /* Prevent text selection during drag */
+    }
+    
+    .game-header {
+        text-align: center;
+        margin-bottom: 20px;
+    }
+    
+    .score-panel {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 10px;
+    }
+    
+    .score, .time {
+        font-size: 16px;
+    }
+    
+    .game-board {
+        display: grid;
+        grid-gap: 2px; /* Spacing between tiles */
+        background-color: #ccc; /* Background for gaps */
+        padding: 2px; /* Padding around the grid */
+        border-radius: 4px;
+    }
+    
+    .game-tile {
+        width: 40px;
+        height: 40px;
+        background-color: #e0e0e0;
+        border-radius: 4px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        font-size: 24px;
+        cursor: pointer;
+        user-select: none; /* Prevent text selection on tiles */
+        transition: border-color 0.1s ease; /* 添加边框颜色过渡，使点击效果更平滑 */
+    }
+    
+    .game-tile:hover {
+        background-color: #d0d0d0; /* 鼠标悬停时稍微改变背景颜色 */
+    }
+    
+    .game-tile.selected {
+        border: 2px solid #007bff;
+        /* 确保 .selected 样式只修改边框，不影响大小 */
+    }
+    
+    .game-tile.matched {
+        visibility: hidden; /* 隐藏已匹配的方块 */
+    }
+    
+    .control-panel {
+        text-align: center;
+        margin-top: 20px;
+    }
+    
+    button {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        background-color: #007bff;
+        color: white;
+        cursor: pointer;
+        font-size: 16px;
+        transition: background-color 0.2s ease; /* 添加按钮背景颜色过渡效果 */
+    }
+    
+    button:hover {
+        background-color: #0056b3;
+    }
+    
+    button:disabled {
+        background-color: #999;
+        cursor: default;
+    }
+    
+    button:disabled:hover {
+        background-color: #999; /* 禁用状态鼠标悬停颜色保持一致 */
+    }
+    
+    
+    @media (max-width: 600px) {
+        .game-tile {
+            width: 30px;
+            height: 30px;
+            font-size: 20px;
+        }
+    }
+    </style>
+</head>
+<body>
+<div class="game-container">
+    <div class="game-header">
+        <h1>连连看</h1>
+    </div>
+    <div class="score-panel">
+        <div class="score">得分: <span id="score">0</span></div>
+        <div class="time">时间: <span id="time">00:00</span></div>
+    </div>
+    <div class="game-board" id="gameBoard">
+        </div>
+    <div class="control-panel">
+        <button id="startButton">开始游戏</button>
+        <button id="resetButton" disabled>重新开始</button>
+    </div>
+</div>
+
+<script>
+const gameBoard = document.getElementById('gameBoard');
+const scoreDisplay = document.getElementById('score');
+const timeDisplay = document.getElementById('time');
+const startButton = document.getElementById('startButton');
+const resetButton = document.getElementById('resetButton');
+
+let tiles = [];
+let gridSize = { rows: 6, cols: 8 }; // 可调整网格大小，更改游戏难度或适应屏幕
+let selectedTiles = [];
+let score = 0;
+let gameStarted = false;
+let timerInterval;
+let timeLeft = 600; // 游戏时间，单位秒，可调整
+
+// 增加更多符号，确保网格大小和符号种类充足
+const tileSymbols = [
+    '🍇', '🍉', '🍌', '🍎', '🍊', '🍋', '🥝', '🍓',
+    '🍒', '🍑', '🥭', '🍍', '🥑', '🥕', '🥦', '🍄',
+    '🍔', '🍕', '🍟', '🌭', '🥪', '🌮', '🍣', '🍦',
+    '🍩', '🍪', '🍫', '🍬', '🍿', '🌰', '🥜', '🍯',
+    '❤️', '🌟', '🌈', '☀️', '🌙', '🌸', '🌺', '🌻',
+    '🐶', '🐱', '🐻', '🐼', '🦊', '🐨', '🐯', '🦁'
+]; // 现在有 64 个符号，远超 6x8 网格所需 (24个)，提供更丰富的选择
+
+startButton.addEventListener('click', startGame);
+resetButton.addEventListener('click', resetGame);
+
+function startGame() {
+    if (!gameStarted) {
+        gameStarted = true;
+        startButton.disabled = true;
+        resetButton.disabled = false;
+        score = 0;
+        scoreDisplay.textContent = score;
+        timeLeft = 60; // 重置时间
+        timeDisplay.textContent = formatTime(timeLeft);
+        clearInterval(timerInterval); // 清除之前的计时器
+        timerInterval = setInterval(updateTimer, 1000); // 启动新的计时器
+        generateTiles();
+        renderBoard();
+    }
+}
+
+function resetGame() {
+    gameStarted = false;
+    startButton.disabled = false;
+    resetButton.disabled = true;
+    clearInterval(timerInterval);
+    timeDisplay.textContent = '00:00';
+    tiles = [];
+    selectedTiles = [];
+    score = 0;
+    scoreDisplay.textContent = score;
+    gameBoard.innerHTML = ''; // 清空游戏面板
+}
+
+function generateTiles() {
+    tiles = [];
+    const numPairs = (gridSize.rows * gridSize.cols) / 2;
+    const symbols = [...tileSymbols].slice(0, tileSymbols.length); // 复制符号数组，避免修改原数组
+
+    if (numPairs > symbols.length) {
+        alert("可用唯一符号不足以填充当前网格大小。请添加更多符号或缩小网格尺寸。");
+        resetGame();
+        return;
+    }
+
+    let pairs = [];
+    for (let i = 0; i < numPairs; i++) {
+        pairs.push(symbols[i % symbols.length]); // 循环使用符号，如果符号数量少于配对数量
+    }
+
+    const duplicatedPairs = [...pairs, ...pairs]; // 复制配对，得到完整的方块数组
+    // 使用 Fisher-Yates 算法洗牌数组
+    for (let i = duplicatedPairs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [duplicatedPairs[i], duplicatedPairs[j]] = [duplicatedPairs[j], duplicatedPairs[i]];
+    }
+
+    let index = 0;
+    for (let row = 0; row < gridSize.rows; row++) {
+        tiles[row] = [];
+        for (let col = 0; col < gridSize.cols; col++) {
+            tiles[row][col] = {
+                symbol: duplicatedPairs[index++],
+                matched: false,
+                selected: false,
+                row: row,
+                col: col
+            };
+        }
+    }
+}
+
+
+function renderBoard() {
+    gameBoard.innerHTML = ''; // 清空之前的游戏面板内容
+    gameBoard.style.gridTemplateColumns = `repeat(${gridSize.cols}, 1fr)`; // 动态设置网格列数
+
+    for (let row = 0; row < gridSize.rows; row++) {
+        for (let col = 0; col < gridSize.cols; col++) {
+            const tile = tiles[row][col];
+            const tileElement = document.createElement('div');
+            tileElement.classList.add('game-tile');
+            tileElement.textContent = tile.symbol;
+            tileElement.dataset.row = row;
+            tileElement.dataset.col = col;
+
+            tileElement.addEventListener('click', handleTileClick);
+
+            if (tile.matched) {
+                tileElement.classList.add('matched');
+            }
+            if (tile.selected) {
+                tileElement.classList.add('selected');
+            }
+
+            gameBoard.appendChild(tileElement);
+        }
+    }
+}
+
+function handleTileClick(event) {
+    if (!gameStarted) return;
+
+    const tileElement = event.target;
+    const row = parseInt(tileElement.dataset.row);
+    const col = parseInt(tileElement.dataset.col);
+    const clickedTile = tiles[row][col];
+
+    if (clickedTile.matched || clickedTile.selected) return; // 忽略已匹配或已选中的方块
+
+    clickedTile.selected = true;
+    tileElement.classList.add('selected');
+    selectedTiles.push(clickedTile);
+
+    if (selectedTiles.length === 2) {
+        const [tile1, tile2] = selectedTiles;
+        if (tile1.symbol === tile2.symbol) {
+            if (canConnect(tile1, tile2)) {
+                score += 10; // 增加得分
+                scoreDisplay.textContent = score;
+                tile1.matched = true;
+                tile2.matched = true;
+                updateBoardForMatch(tile1, tile2);
+                checkGameWin();
+            } else {
+                setTimeout(() => {
+                    resetSelection();
+                }, 500); // 短暂延时后重置选择
+            }
+        } else {
+            setTimeout(() => {
+                resetSelection();
+            }, 500); // 短暂延时后重置选择
+        }
+    } else if (selectedTiles.length > 2) {
+        resetSelection();
+        clickedTile.selected = true;
+        tileElement.classList.add('selected');
+        selectedTiles.push(clickedTile);
+    }
+}
+
+function updateBoardForMatch(tile1, tile2) {
+    const tileElement1 = gameBoard.children[tile1.row * gridSize.cols + tile1.col];
+    const tileElement2 = gameBoard.children[tile2.row * gridSize.cols + tile2.col];
+    tileElement1.classList.add('matched');
+    tileElement2.classList.add('matched');
+    resetSelection(); // 匹配后清除选择状态
+}
+
+
+function resetSelection() {
+    selectedTiles.forEach(tile => {
+        tile.selected = false;
+        const tileElement = gameBoard.children[tile.row * gridSize.cols + tile.col];
+        if(tileElement) { // 检查元素是否仍然在 DOM 中 (可能已被匹配移除)
+            tileElement.classList.remove('selected');
+        }
+    });
+    selectedTiles = [];
+}
+
+
+function canConnect(tile1, tile2) {
+    if (tile1 === tile2) return false; // 不能连接自身
+
+    // 检查两个方块是否在同一行或同一列，且之间没有其他未消除的方块
+    if (tile1.row === tile2.row) { // 同一行
+        if (isStraightLineClear(tile1, tile2, 'row')) { // 使用更准确的函数名
+            return true;
+        }
+    }
+    if (tile1.col === tile2.col) { // 同一列
+        if (isStraightLineClear(tile1, tile2, 'col')) { // 使用更准确的函数名
+            return true;
+        }
+    }
+
+    // 检查单折线连接
+    if (isSingleLineCornerClear(tile1, tile2)) {
+        return true;
+    }
+
+    // 检查双折线连接 (最多允许两个拐角)
+    if (isDoubleLineCornerClear(tile1, tile2)) {
+        return true;
+    }
+
+
+    return false; // 没有找到有效连接路径
+}
+
+function isStraightLineClear(tile1, tile2, orientation) { // 更准确的函数名
+    if (orientation === 'row') {
+        const row = tile1.row;
+        const startCol = Math.min(tile1.col, tile2.col) + 1;
+        const endCol = Math.max(tile1.col, tile2.col);
+        for (let col = startCol; col < endCol; col++) {
+            if (tiles[row][col].matched === false) {
+                return false; // 路径上有未消除的方块，不通
+            }
+        }
+        return true; // 直线路径上没有障碍物，可连接
+    } else if (orientation === 'col') {
+        const col = tile1.col;
+        const startRow = Math.min(tile1.row, tile2.row) + 1;
+        const endRow = Math.max(tile1.row, tile2.row);
+        for (let row = startRow; row < endRow; row++) {
+            if (tiles[row][col].matched === false) {
+                return false; // 路径上有未消除的方块，不通
+            }
+        }
+        return true; // 直线路径上没有障碍物，可连接
+    }
+    return false; // orientation 参数错误
+}
+
+
+function isSingleLineCornerClear(tile1, tile2) {
+    const cornerTile1 = tiles[tile1.row][tile2.col]; // 第一个拐角点
+    const cornerTile2 = tiles[tile2.row][tile1.col]; // 第二个拐角点
+
+    // 情况1: tile1 -> cornerTile1 -> tile2  (横向再纵向)
+    if (cornerTile1.matched !== false) { // 角落方块必须是空的 (已匹配)
+        if (isStraightLineClear(tile1, cornerTile1, 'row') && isStraightLineClear(cornerTile1, tile2, 'col')) {
+            return true;
+        }
+    }
+    // 情况2: tile1 -> cornerTile2 -> tile2  (纵向再横向)
+    if (cornerTile2.matched !== false) { // 角落方块必须是空的 (已匹配)
+        if (isStraightLineClear(tile1, cornerTile2, 'col') && isStraightLineClear(cornerTile2, tile2, 'row')) {
+            return true;
+        }
+    }
+    return false; // 没有单折线路径
+}
+
+
+function isDoubleLineCornerClear(tile1, tile2) {
+    for (let row = 0; row < gridSize.rows; row++) { // 遍历所有可能的中间行
+        for (let col = 0; col < gridSize.cols; col++) { // 遍历所有可能的中间列
+            const cornerTile1 = tiles[tile1.row][col]; // 第一个可能的拐角点
+            const cornerTile2 = tiles[row][tile2.col]; // 第二个可能的拐角点
+
+            if (cornerTile1.matched !== false && cornerTile2.matched !== false) { // 两个角落点都必须是空的
+                if (isStraightLineClear(tile1, cornerTile1, 'row') &&
+                    isStraightLineClear(cornerTile1, cornerTile2, 'col') &&
+                    isStraightLineClear(cornerTile2, tile2, 'row')) {
+                    return true; // 找到双折线路径 (横-纵-横)
+                }
+            }
+
+            const cornerTile3 = tiles[row][tile1.col]; // 第三个可能的拐角点
+            const cornerTile4 = tiles[tile2.row][col]; // 第四个可能的拐角点
+
+             if (cornerTile3.matched !== false && cornerTile4.matched !== false) { // 两个角落点都必须是空的
+                if (isStraightLineClear(tile1, cornerTile3, 'col') &&
+                    isStraightLineClear(cornerTile3, cornerTile4, 'row') &&
+                    isStraightLineClear(cornerTile4, tile2, 'col')) {
+                    return true; // 找到双折线路径 (纵-横-纵)
+                }
+            }
+        }
+    }
+    return false; // 没有双折线路径
+}
+
+
+
+function checkGameWin() {
+    let allMatched = true;
+    for (let row = 0; row < gridSize.rows; row++) {
+        for (let col = 0; col < gridSize.cols; col++) {
+            if (!tiles[row][col].matched) {
+                allMatched = false;
+                break;
+            }
+        }
+        if (!allMatched) break;
+    }
+
+    if (allMatched) {
+        gameWin();
+    }
+}
+
+function gameWin() {
+    gameStarted = false;
+    clearInterval(timerInterval);
+    startButton.disabled = false;
+    resetButton.disabled = false;
+    alert(`恭喜你，游戏胜利！ 得分: ${score}`);
+}
+
+
+function updateTimer() {
+    timeLeft--;
+    timeDisplay.textContent = formatTime(timeLeft);
+
+    if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        gameOver();
+    }
+}
+
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return `${String(minutes).padStart(2, '0')}:${String(remainingSeconds).padStart(2, '0')}`;
+}
+
+function gameOver() {
+    gameStarted = false;
+    clearInterval(timerInterval);
+    startButton.disabled = false;
+    resetButton.disabled = false;
+    alert(`时间到！游戏结束。 得分: ${score}`);
+}
+
+resetGame(); // 页面加载时初始化游戏状态
+</script>
