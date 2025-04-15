@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>连连看小游戏</title>
+    <style>
+        :root {
+            --board-bg-color: #f0f0f0;
+            --tile-bg-color: #ffffff;
+            --tile-border-color: #cccccc;
+            --tile-selected-color: #a0e9ff;
+            --tile-hover-color: #e0f7ff;
+            --tile-removed-color: #f0f0f0;
+            --text-color: #333;
+            --win-bg-color: rgba(0, 0, 0, 0.7);
+            --win-text-color: #fff;
+            --button-bg-color: #007bff;
+            --button-text-color: #fff;
+            --button-hover-bg-color: #0056b3;
+            --font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: var(--board-bg-color);
+            font-family: var(--font-family);
+            color: var(--text-color);
+            margin: 0;
+            padding: 10px;
+            box-sizing: border-box;
+            overflow: hidden; /* 防止棋盘过大时出现滚动条 */
+        }
+
+        #game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            margin-top: 0;
+            margin-bottom: 20px;
+            color: var(--text-color);
+        }
+
+        #game-board {
+            display: grid;
+            border: 1px solid var(--tile-border-color);
+            /* 使用 vmin 保证在不同屏幕比例下都能较好显示 */
+            max-width: 90vmin;
+            max-height: 80vmin;
+            aspect-ratio: var(--grid-cols) / var(--grid-rows); /* 保持宽高比 */
+            overflow: hidden; /* 确保内容不溢出 */
+        }
+
+        .tile {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--tile-bg-color);
+            border: 1px solid var(--tile-border-color);
+            font-size: min(4vmin, 30px); /* 字体大小响应式 */
+            cursor: pointer;
+            user-select: none;
+            transition: background-color 0.2s ease, transform 0.2s ease, opacity 0.3s ease;
+            box-sizing: border-box; /* 边框计入宽高 */
+            overflow: hidden; /* 防止内容溢出 */
+        }
+
+        .tile:not(.empty):hover {
+            background-color: var(--tile-hover-color);
+            transform: scale(1.05);
+        }
+
+        .tile.selected {
+            background-color: var(--tile-selected-color);
+            box-shadow: 0 0 5px 2px var(--tile-selected-color);
+            transform: scale(1.08);
+        }
+
+        .tile.empty {
+            background-color: var(--tile-removed-color);
+            border-color: transparent; /* 可以让空格子不那么明显 */
+            cursor: default;
+            opacity: 0; /* 使空格子不可见 */
+            pointer-events: none; /* 不响应点击 */
+        }
+
+        /* 消除时的动画 */
+        .tile.removing {
+            opacity: 0;
+            transform: scale(0.5);
+        }
+
+        #win-message {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--win-bg-color);
+            color: var(--win-text-color);
+            display: none; /* Initially hidden */
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-size: 2em;
+            text-align: center;
+            z-index: 1000;
+        }
+
+        #win-message button {
+            margin-top: 20px;
+            padding: 10px 20px;
+            font-size: 0.8em;
+            cursor: pointer;
+            background-color: var(--button-bg-color);
+            color: var(--button-text-color);
+            border: none;
+            border-radius: 5px;
+            transition: background-color 0.2s ease;
+        }
+
+        #win-message button:hover {
+             background-color: var(--button-hover-bg-color);
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-container">
+    <h1>连连看</h1>
+    <div id="game-board"></div>
+</div>
+
+<div id="win-message">
+    <p>恭喜你，挑战成功！</p>
+    <button onclick="initGame()">再玩一局</button>
+</div>
+
+<script>
+    const gameBoardElement = document.getElementById('game-board');
+    const winMessageElement = document.getElementById('win-message');
+
+    // --- 游戏配置 ---
+    const GRID_ROWS = 10; // 包含外围空行
+    const GRID_COLS = 12; // 包含外围空列
+    // 注意：实际可玩区域是 (GRID_ROWS - 2) x (GRID_COLS - 2)
+    // 图标必须是成对的，总数 = (GRID_ROWS - 2) * (GRID_COLS - 2)
+    const ICONS = ['🍎', '🍌', '🍇', '🍉', '🍓', '🍒', '🍑', '🍍', '🥝', '🥭',
+                   '🥥', '🍅', '🍆', '🥑', '🥦', '🥬', '🥒', '🌶', '🌽', '🥕',
+                   '🧄', '🧅', '🥔', '🍠', '🥐', '🥯', '🍞', '🥖', '🥨', '🧀',
+                   '🥚', '🍳', '🧈', '🥞', '🧇', '🥓', '🥩', '🍗', '🍖', '🦴']; // 40种图标
+
+    let grid = []; // 存储棋盘状态 (0表示空)
+    let firstSelection = null; // { row, col, element, icon }
+    let totalPairs = 0;
+    let pairsLeft = 0;
+
+    // --- 核心逻辑 ---
+
+    function initGame() {
+        // 0. 清理旧状态
+        gameBoardElement.innerHTML = '';
+        grid = [];
+        firstSelection = null;
+        winMessageElement.style.display = 'none';
+
+        // 1. 确保总格子数为偶数
+        const playableRows = GRID_ROWS - 2;
+        const playableCols = GRID_COLS - 2;
+        const totalPlayableTiles = playableRows * playableCols;
+        if (totalPlayableTiles % 2 !== 0) {
+            console.error("棋盘可玩区域格子总数必须为偶数！请调整 GRID_ROWS 或 GRID_COLS。");
+            // 可以选择在这里停止或调整尺寸，这里简单报错
+            alert("棋盘尺寸配置错误，无法开始游戏。");
+            return;
+        }
+
+        totalPairs = totalPlayableTiles / 2;
+        pairsLeft = totalPairs;
+
+        // 2. 准备图标列表 (确保图标足够)
+        const neededIcons = [];
+        const availableIcons = [...ICONS]; // 复制一份可用图标
+        if (availableIcons.length < totalPairs) {
+             console.error(`图标种类不足！需要 ${totalPairs} 种，但只有 ${availableIcons.length} 种。`);
+             alert("图标不足，无法开始游戏。");
+             return;
+        }
+        // 从可用图标中随机选取所需数量的图标种类
+        shuffleArray(availableIcons);
+        for (let i = 0; i < totalPairs; i++) {
+            const icon = availableIcons[i];
+            neededIcons.push(icon, icon); // 添加一对
+        }
+
+        // 3. 打乱图标顺序
+        shuffleArray(neededIcons);
+
+        // 4. 创建逻辑棋盘 (带外围空边)
+        let iconIndex = 0;
+        for (let r = 0; r < GRID_ROWS; r++) {
+            grid[r] = [];
+            for (let c = 0; c < GRID_COLS; c++) {
+                if (r === 0 || r === GRID_ROWS - 1 || c === 0 || c === GRID_COLS - 1) {
+                    grid[r][c] = 0; // 外围设为空
+                } else {
+                    grid[r][c] = neededIcons[iconIndex++];
+                }
+            }
+        }
+
+         // 5. 渲染棋盘
+        renderBoard();
+
+        // 6. 设置 CSS 变量以控制 Grid 布局
+        gameBoardElement.style.setProperty('--grid-rows', GRID_ROWS);
+        gameBoardElement.style.setProperty('--grid-cols', GRID_COLS);
+        gameBoardElement.style.gridTemplateRows = `repeat(${GRID_ROWS}, 1fr)`;
+        gameBoardElement.style.gridTemplateColumns = `repeat(${GRID_COLS}, 1fr)`;
+
+         // 7. (可选) 检查初始棋盘是否有解或需要洗牌，这里简化，不实现
+         // if (!hasPossibleMoves()) { shuffleBoard(); } // shuffleBoard 较复杂，暂不实现
+    }
+
+    function renderBoard() {
+        gameBoardElement.innerHTML = ''; // 清空旧棋盘
+        for (let r = 0; r < GRID_ROWS; r++) {
+            for (let c = 0; c < GRID_COLS; c++) {
+                const tile = document.createElement('div');
+                tile.classList.add('tile');
+                tile.dataset.row = r;
+                tile.dataset.col = c;
+
+                if (grid[r][c] === 0) {
+                    tile.classList.add('empty');
+                } else {
+                    tile.textContent = grid[r][c];
+                    tile.addEventListener('click', handleTileClick);
+                }
+                gameBoardElement.appendChild(tile);
+            }
+        }
+    }
+
+    function handleTileClick(event) {
+        const clickedElement = event.target;
+        // 防止点击到已经被标记为 removing 的元素
+        if (clickedElement.classList.contains('removing')) return;
+
+        const row = parseInt(clickedElement.dataset.row);
+        const col = parseInt(clickedElement.dataset.col);
+        const icon = grid[row][col];
+
+        // 如果点击的是空格子或者正在移除的格子，则无效
+        if (icon === 0) return;
+
+        if (!firstSelection) {
+            // 第一次选择
+            firstSelection = { row, col, element: clickedElement, icon };
+            clickedElement.classList.add('selected');
+        } else {
+            // 第二次选择
+            // 1. 不能选择同一个格子
+            if (firstSelection.row === row && firstSelection.col === col) {
+                firstSelection.element.classList.remove('selected');
+                firstSelection = null;
+                return;
+            }
+
+            // 2. 检查图标是否相同
+            if (firstSelection.icon === icon) {
+                // 3. 检查路径是否可达
+                if (canConnect(firstSelection, { row, col })) {
+                    // 连接成功，移除
+                    removeTiles(firstSelection, { row, col, element: clickedElement });
+                    pairsLeft--;
+                    firstSelection = null; // 清空选择
+
+                    // 检查是否胜利
+                    if (pairsLeft === 0) {
+                        showWinMessage();
+                    }
+                } else {
+                    // 图标相同但路径不通，取消第一次选择，并将当前点击设为新的第一次选择
+                    firstSelection.element.classList.remove('selected');
+                    firstSelection = { row, col, element: clickedElement, icon };
+                    clickedElement.classList.add('selected');
+                }
+            } else {
+                // 图标不同，取消第一次选择，并将当前点击设为新的第一次选择
+                firstSelection.element.classList.remove('selected');
+                firstSelection = { row, col, element: clickedElement, icon };
+                clickedElement.classList.add('selected');
+            }
+        }
+    }
+
+    function removeTiles(tile1, tile2) {
+        // 添加移除动画类
+        tile1.element.classList.add('removing');
+        tile2.element.classList.add('removing');
+
+        // 移除选中状态
+        tile1.element.classList.remove('selected');
+        // tile2.element 可能没有 selected 类，但移除也没关系
+
+        // 更新逻辑棋盘
+        grid[tile1.row][tile1.col] = 0;
+        grid[tile2.row][tile2.col] = 0;
+
+        // 在动画结束后彻底隐藏并移除事件监听器
+        setTimeout(() => {
+            tile1.element.classList.add('empty');
+            tile1.element.textContent = '';
+            tile1.element.removeEventListener('click', handleTileClick);
+            tile1.element.classList.remove('removing'); // 移除动画类，保持 empty
+
+            tile2.element.classList.add('empty');
+            tile2.element.textContent = '';
+            tile2.element.removeEventListener('click', handleTileClick);
+            tile2.element.classList.remove('removing');
+        }, 300); // 动画时间为 0.3s
+    }
+
+    function showWinMessage() {
+        winMessageElement.style.display = 'flex';
+    }
+
+    // --- 路径检查核心逻辑 ---
+
+    function isEmpty(r, c) {
+        // 检查是否在棋盘内部且为空
+        return r >= 0 && r < GRID_ROWS && c >= 0 && c < GRID_COLS && grid[r][c] === 0;
+    }
+
+    // 检查两点之间是否有直线路径 (不含端点)
+    function hasClearLine(p1, p2) {
+        // 必须在同一行或同一列
+        if (p1.row !== p2.row && p1.col !== p2.col) {
+            return false;
+        }
+
+        // 同一行
+        if (p1.row === p2.row) {
+            const startCol = Math.min(p1.col, p2.col) + 1;
+            const endCol = Math.max(p1.col, p2.col);
+            for (let c = startCol; c < endCol; c++) {
+                if (!isEmpty(p1.row, c)) return false;
+            }
+            return true;
+        }
+        // 同一列
+        else { // p1.col === p2.col
+            const startRow = Math.min(p1.row, p2.row) + 1;
+            const endRow = Math.max(p1.row, p2.row);
+            for (let r = startRow; r < endRow; r++) {
+                if (!isEmpty(r, p1.col)) return false;
+            }
+            return true;
+        }
+    }
+
+    function canConnect(p1, p2) {
+        // 0 折 (相邻且中间没有阻挡，或者就是紧挨着)
+        // 实际上因为有外围空行空列，hasClearLine 已经可以处理紧邻的情况
+        if ( (p1.row === p2.row || p1.col === p2.col) && hasClearLine(p1, p2) ) {
+            //console.log("0 折连接");
+            return true;
+        }
+
+        // 1 折
+        // 尝试两个可能的拐点
+        const corner1 = { row: p1.row, col: p2.col };
+        const corner2 = { row: p2.row, col: p1.col };
+
+        if (isEmpty(corner1.row, corner1.col)) {
+            if (hasClearLine(p1, corner1) && hasClearLine(corner1, p2)) {
+                 //console.log("1 折连接 via", corner1);
+                return true;
+            }
+        }
+        if (isEmpty(corner2.row, corner2.col)) {
+             if (hasClearLine(p1, corner2) && hasClearLine(corner2, p2)) {
+                 //console.log("1 折连接 via", corner2);
+                return true;
+            }
+        }
+
+        // 2 折
+        // 遍历所有可能的中间连线（水平或垂直延伸）
+        // 检查 p1 水平方向延伸出去的空点 k，看 k 能否 1 折连接到 p2
+        for (let c = 0; c < GRID_COLS; c++) {
+            const k = { row: p1.row, col: c };
+            if (isEmpty(k.row, k.col) && hasClearLine(p1, k)) { // p1到k直线可达
+                const corner1_k = { row: k.row, col: p2.col }; // 潜在的k->p2拐点1
+                const corner2_k = { row: p2.row, col: k.col }; // 潜在的k->p2拐点2 (注意这里是k.col)
+                // 检查 k -> corner1_k -> p2
+                if (isEmpty(corner1_k.row, corner1_k.col) && k.row === corner1_k.row) { // k和corner1_k同行
+                   if (hasClearLine(k, corner1_k) && hasClearLine(corner1_k, p2)) {
+                       //console.log(`2 折连接: p1(${p1.row},${p1.col}) -> k(${k.row},${k.col}) -> c1k(${corner1_k.row},${corner1_k.col}) -> p2(${p2.row},${p2.col})`);
+                       return true;
+                   }
+                }
+                 // 检查 k -> corner2_k -> p2
+                if (isEmpty(corner2_k.row, corner2_k.col) && k.col === corner2_k.col) { // k和corner2_k同列
+                    if (hasClearLine(k, corner2_k) && hasClearLine(corner2_k, p2)) {
+                        //console.log(`2 折连接: p1(${p1.row},${p1.col}) -> k(${k.row},${k.col}) -> c2k(${corner2_k.row},${corner2_k.col}) -> p2(${p2.row},${p2.col})`);
+                        return true;
+                    }
+                }
+            }
+        }
+        // 检查 p1 垂直方向延伸出去的空点 k，看 k 能否 1 折连接到 p2
+         for (let r = 0; r < GRID_ROWS; r++) {
+            const k = { row: r, col: p1.col };
+             if (isEmpty(k.row, k.col) && hasClearLine(p1, k)) { // p1到k直线可达
+                const corner1_k = { row: k.row, col: p2.col }; // 潜在的k->p2拐点1 (注意这里是k.row)
+                const corner2_k = { row: p2.row, col: k.col }; // 潜在的k->p2拐点2
+                // 检查 k -> corner1_k -> p2
+                if (isEmpty(corner1_k.row, corner1_k.col) && k.row === corner1_k.row) { // k和corner1_k同行
+                   if (hasClearLine(k, corner1_k) && hasClearLine(corner1_k, p2)) {
+                       //console.log(`2 折连接: p1(${p1.row},${p1.col}) -> k(${k.row},${k.col}) -> c1k(${corner1_k.row},${corner1_k.col}) -> p2(${p2.row},${p2.col})`);
+                       return true;
+                   }
+                }
+                 // 检查 k -> corner2_k -> p2
+                if (isEmpty(corner2_k.row, corner2_k.col) && k.col === corner2_k.col) { // k和corner2_k同列
+                    if (hasClearLine(k, corner2_k) && hasClearLine(corner2_k, p2)) {
+                        //console.log(`2 折连接: p1(${p1.row},${p1.col}) -> k(${k.row},${k.col}) -> c2k(${corner2_k.row},${corner2_k.col}) -> p2(${p2.row},${p2.col})`);
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false; // 所有情况都不满足
+    }
+
+    // --- 工具函数 ---
+    function shuffleArray(array) {
+        for (let i = array.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [array[i], array[j]] = [array[j], array[i]]; // Swap
+        }
+    }
+
+    // --- 初始化游戏 ---
+    // 确保DOM加载完成后再初始化
+    document.addEventListener('DOMContentLoaded', initGame);
+
+</script>
+
+</body>
+</html>
