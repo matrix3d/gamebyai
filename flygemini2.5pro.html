@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Simple 3D Flight Simulator</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #87ceeb; font-family: sans-serif; }
+        canvas { display: block; }
+        #controls {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 10;
+            opacity: 0.7;
+            pointer-events: none; /* Allow clicks through the container */
+        }
+        .control-button {
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            border: 1px solid white;
+            border-radius: 50%; /* Circular buttons */
+            width: 50px;
+            height: 50px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 20px;
+            cursor: pointer;
+            user-select: none; /* Prevent text selection */
+            pointer-events: auto; /* Enable clicks on buttons */
+            touch-action: manipulation; /* Improve touch responsiveness */
+        }
+        #left-controls, #right-controls {
+            display: grid;
+            gap: 10px;
+        }
+        #left-controls {
+             grid-template-areas:
+                ". up ."
+                "left . right"
+                ". down .";
+        }
+         #right-controls {
+             grid-template-areas:
+                "throttle-up"
+                "."
+                "throttle-down";
+            justify-items: center; /* Center items horizontally in the grid */
+        }
+
+        #pitch-up { grid-area: up; }
+        #pitch-down { grid-area: down; }
+        #roll-left { grid-area: left; }
+        #roll-right { grid-area: right; }
+        #throttle-up { grid-area: throttle-up; }
+        #throttle-down { grid-area: throttle-down; }
+
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            background-color: rgba(0,0,0,0.5);
+            padding: 5px;
+            border-radius: 3px;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        /* Hide touch controls on wider screens (likely PC) */
+        @media (min-width: 768px) {
+            #controls {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- On-screen Controls for Mobile -->
+    <div id="controls">
+        <div id="left-controls">
+            <div class="control-button" id="pitch-up">▲</div>
+            <div class="control-button" id="pitch-down">▼</div>
+            <div class="control-button" id="roll-left">◀</div>
+            <div class="control-button" id="roll-right">▶</div>
+        </div>
+        <div id="right-controls">
+            <div class="control-button" id="throttle-up">W</div>
+            <div class="control-button" id="throttle-down">S</div>
+        </div>
+    </div>
+
+    <!-- Heads-Up Display -->
+    <div id="hud">
+        Speed: 0.00<br>
+        Altitude: 0.00
+    </div>
+
+    <!-- Import Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <!-- Main Game Logic -->
+    <script type="module">
+        import * as THREE from 'three';
+
+        let scene, camera, renderer;
+        let plane, ground;
+        let clock = new THREE.Clock();
+
+        // Flight parameters
+        let speed = 0;
+        const maxSpeed = 0.8;
+        const minSpeed = 0.05;
+        const acceleration = 0.3;
+        const deceleration = 0.1; // Natural drag
+        const rollSpeed = 1.5;
+        const pitchSpeed = 1.0;
+
+        // Input state
+        const input = {
+            throttleUp: false,
+            throttleDown: false,
+            pitchUp: false,
+            pitchDown: false,
+            rollLeft: false,
+            rollRight: false
+        };
+
+        const hudElement = document.getElementById('hud');
+
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87ceeb); // Sky blue
+            scene.fog = new THREE.Fog(0x87ceeb, 100, 500); // Add fog for distance effect
+
+            // Camera
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            // Position camera behind and slightly above where the plane will be
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true; // Enable shadows
+            document.body.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1.0);
+            directionalLight.position.set(50, 100, 50);
+            directionalLight.castShadow = true;
+            // Configure shadow properties for performance/quality
+            directionalLight.shadow.mapSize.width = 1024;
+            directionalLight.shadow.mapSize.height = 1024;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 500;
+            directionalLight.shadow.camera.left = -150;
+            directionalLight.shadow.camera.right = 150;
+            directionalLight.shadow.camera.top = 150;
+            directionalLight.shadow.camera.bottom = -150;
+            scene.add(directionalLight);
+            // scene.add(new THREE.CameraHelper(directionalLight.shadow.camera)); // Debug shadows
+
+
+            // Ground
+            const groundGeometry = new THREE.PlaneGeometry(1000, 1000);
+            // Use MeshLambertMaterial or MeshPhongMaterial for lighting effects
+            const groundMaterial = new THREE.MeshPhongMaterial({ color: 0x228b22, side: THREE.DoubleSide }); // Forest green
+            ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2; // Rotate flat
+            ground.receiveShadow = true; // Ground receives shadows
+            scene.add(ground);
+
+            // Add some simple obstacles/features on the ground
+            const cubeGeometry = new THREE.BoxGeometry(5, 5, 5);
+            const cubeMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa });
+            for (let i = 0; i < 50; i++) {
+                const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+                cube.position.set(
+                    (Math.random() - 0.5) * 800,
+                    2.5, // Position on top of the ground
+                    (Math.random() - 0.5) * 800
+                );
+                cube.castShadow = true;
+                cube.receiveShadow = true;
+                scene.add(cube);
+            }
+
+
+            // Airplane Model (Simple composite object)
+            plane = new THREE.Group();
+            scene.add(plane);
+
+            const bodyMaterial = new THREE.MeshPhongMaterial({ color: 0xcccccc }); // Light grey
+            const wingMaterial = new THREE.MeshPhongMaterial({ color: 0xaaaaaa }); // Darker grey
+            const tailMaterial = new THREE.MeshPhongMaterial({ color: 0xdd0000 }); // Red
+
+            // Fuselage
+            const fuselageGeometry = new THREE.BoxGeometry(1, 0.8, 4); // width, height, length
+            const fuselage = new THREE.Mesh(fuselageGeometry, bodyMaterial);
+            fuselage.castShadow = true;
+            plane.add(fuselage);
+
+            // Wings
+            const wingGeometry = new THREE.BoxGeometry(7, 0.2, 1.5);
+            const wing = new THREE.Mesh(wingGeometry, wingMaterial);
+            wing.position.set(0, 0, 0); // Centered on fuselage
+            wing.castShadow = true;
+            plane.add(wing);
+
+            // Tail Fin (Vertical Stabilizer)
+            const tailFinGeometry = new THREE.BoxGeometry(0.2, 1, 0.8);
+            const tailFin = new THREE.Mesh(tailFinGeometry, tailMaterial);
+            tailFin.position.set(0, 0.8, 2); // On top, towards the back
+            tailFin.castShadow = true;
+            plane.add(tailFin);
+
+             // Horizontal Stabilizer
+            const hStabGeometry = new THREE.BoxGeometry(2.5, 0.1, 0.6);
+            const hStab = new THREE.Mesh(hStabGeometry, wingMaterial);
+            hStab.position.set(0, 0.1, 2.2); // Near the tail fin
+            hStab.castShadow = true;
+            plane.add(hStab);
+
+
+            // Initial Plane Position
+            plane.position.set(0, 10, 0); // Start 10 units above the ground
+            plane.rotation.order = 'ZYX'; // Set rotation order (Yaw, Pitch, Roll) - Common for aircraft
+
+            // Set initial camera position relative to the plane
+            updateCameraPosition();
+
+            // Event Listeners
+            window.addEventListener('resize', onWindowResize, false);
+            setupControls();
+        }
+
+        function setupControls() {
+            // Keyboard Controls
+            document.addEventListener('keydown', (event) => {
+                switch(event.code) {
+                    case 'ArrowUp': input.pitchDown = true; break; // Pitch down (Nose up)
+                    case 'ArrowDown': input.pitchUp = true; break;   // Pitch up (Nose down)
+                    case 'ArrowLeft': input.rollLeft = true; break;
+                    case 'ArrowRight': input.rollRight = true; break;
+                    case 'KeyW': input.throttleUp = true; break;
+                    case 'KeyS': input.throttleDown = true; break;
+                }
+                 // Prevent default scrolling behavior for arrow keys
+                 if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) {
+                    event.preventDefault();
+                }
+            });
+
+            document.addEventListener('keyup', (event) => {
+                 switch(event.code) {
+                    case 'ArrowUp': input.pitchDown = false; break;
+                    case 'ArrowDown': input.pitchUp = false; break;
+                    case 'ArrowLeft': input.rollLeft = false; break;
+                    case 'ArrowRight': input.rollRight = false; break;
+                    case 'KeyW': input.throttleUp = false; break;
+                    case 'KeyS': input.throttleDown = false; break;
+                }
+            });
+
+             // Touch Controls
+            const buttons = {
+                'pitch-up': 'pitchDown', // Inverted: Button UP makes plane nose UP (pitch DOWN graphically)
+                'pitch-down': 'pitchUp',
+                'roll-left': 'rollLeft',
+                'roll-right': 'rollRight',
+                'throttle-up': 'throttleUp',
+                'throttle-down': 'throttleDown'
+            };
+
+            for (const [buttonId, inputKey] of Object.entries(buttons)) {
+                const button = document.getElementById(buttonId);
+                if (button) {
+                    button.addEventListener('touchstart', (e) => {
+                        e.preventDefault(); // Prevent screen zoom/scroll
+                        input[inputKey] = true;
+                        button.style.backgroundColor = 'rgba(255, 255, 255, 0.5)'; // Feedback
+                    }, { passive: false }); // Need passive: false to call preventDefault
+
+                    button.addEventListener('touchend', (e) => {
+                        e.preventDefault();
+                        input[inputKey] = false;
+                        button.style.backgroundColor = 'rgba(0, 0, 0, 0.5)'; // Reset style
+                    });
+                     button.addEventListener('touchcancel', (e) => { // Handle cases where touch is interrupted
+                        e.preventDefault();
+                        input[inputKey] = false;
+                        button.style.backgroundColor = 'rgba(0, 0, 0, 0.5)';
+                    });
+                }
+            }
+        }
+
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function updateCameraPosition() {
+            const cameraOffset = new THREE.Vector3(0, 3, 10); // Distance behind and above the plane
+
+            // Apply the plane's world rotation to the offset vector
+            cameraOffset.applyQuaternion(plane.quaternion);
+
+            // Calculate the desired camera position
+            const cameraTargetPosition = plane.position.clone().add(cameraOffset);
+
+            // Smoothly interpolate camera position (optional, can just use copy)
+            // camera.position.lerp(cameraTargetPosition, 0.1);
+             camera.position.copy(cameraTargetPosition);
+
+
+            // Make the camera look at a point slightly in front of the plane
+            const lookAtOffset = new THREE.Vector3(0, 1, -10); // Point in front of the plane
+            lookAtOffset.applyQuaternion(plane.quaternion);
+            const lookAtTargetPosition = plane.position.clone().add(lookAtOffset);
+
+            camera.lookAt(lookAtTargetPosition);
+        }
+
+        function updateHUD() {
+             if (hudElement) {
+                const altitude = Math.max(0, plane.position.y).toFixed(2); // Don't show negative altitude
+                hudElement.innerHTML = `Speed: ${speed.toFixed(2)}<br>Altitude: ${altitude}`;
+             }
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const delta = clock.getDelta(); // Time since last frame
+
+            // Update Speed based on throttle input
+            if (input.throttleUp) {
+                speed += acceleration * delta;
+            } else if (input.throttleDown) {
+                speed -= acceleration * delta * 1.5; // Faster deceleration when braking
+            } else {
+                // Apply natural drag/deceleration
+                speed -= deceleration * delta;
+            }
+            speed = Math.max(minSpeed, Math.min(speed, maxSpeed)); // Clamp speed
+
+
+            // Apply Roll (Rotation around Z-axis in local space)
+            let targetRoll = 0;
+            if (input.rollLeft) targetRoll += rollSpeed * delta;
+            if (input.rollRight) targetRoll -= rollSpeed * delta;
+            plane.rotateZ(targetRoll);
+
+             // Apply Pitch (Rotation around X-axis in local space)
+             let targetPitch = 0;
+            if (input.pitchUp) targetPitch += pitchSpeed * delta;
+            if (input.pitchDown) targetPitch -= pitchSpeed * delta;
+            plane.rotateX(targetPitch);
+
+             // Simple auto-leveling for roll (optional)
+            // const rollAngle = plane.rotation.z;
+            // plane.rotateZ(-rollAngle * 0.05); // Gently return to level
+
+
+            // Calculate forward movement direction based on plane's rotation
+            const moveDirection = new THREE.Vector3(0, 0, -1); // Forward is -Z in local space
+            moveDirection.applyQuaternion(plane.quaternion); // Apply plane's rotation
+
+            // Update plane position
+            plane.position.add(moveDirection.multiplyScalar(speed));
+
+            // Prevent flying below ground
+            if (plane.position.y < 0.5) {
+                plane.position.y = 0.5;
+                speed *= 0.8; // Lose some speed on "ground contact"
+                // Optionally reset rotation or cause a "crash" state here
+            }
+
+            // Update Camera to follow plane
+            updateCameraPosition();
+
+            // Update HUD
+            updateHUD();
+
+            // Render the scene
+            renderer.render(scene, camera);
+        }
+
+        // Start the simulation
+        init();
+        animate();
+
+    </script>
+
+</body>
+</html>
