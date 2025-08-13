@@ -10,3 +10,5 @@
 <a href="https://matrix3d.github.io/gamebyai/llkgemini2.5pro.html">连连看gemini2.5pro</a> 
 
 <a href="https://matrix3d.github.io/gamebyai/flygemini2.5pro.html">飞机gemini2.5pro</a> 
+
+<a href="https://matrix3d.github.io/gamebyai/sortwatergpt5.html">sortwater</a> 
