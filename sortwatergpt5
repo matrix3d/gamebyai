@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+  <title>水排序瓶子游戏 · H5</title>
+  <style>
+    :root{
+      --bg: #0f1221;
+      --panel: #171a2e;
+      --text: #e9ecf1;
+      --muted: #99a1b3;
+      --accent: #8ab4ff;
+      --good: #37d399;
+      --bad: #ff6b6b;
+      --bottle: #20243e;
+      --slot: #2a2f52;
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --radius: 18px;
+      --cap: 4; /* 每瓶容量 */
+    }
+    html,body{height:100%;}
+    body{
+      margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: radial-gradient(1000px 500px at 70% -20%, #233, transparent), var(--bg);
+      color: var(--text);
+      display:flex; flex-direction:column; gap:14px; align-items:center; justify-content:flex-start;
+    }
+    header{
+      width: min(1100px, 96vw);
+      display:flex; align-items:center; justify-content:space-between; gap:8px; padding:16px 8px 0;
+    }
+    .title{ font-weight:700; letter-spacing:0.2px; }
+    .title b{ color: var(--accent); }
+
+    .controls{
+      display:flex; flex-wrap:wrap; gap:8px;
+    }
+    button{
+      appearance:none; border:1px solid rgba(255,255,255,.12); background:var(--panel); color:var(--text);
+      padding:10px 14px; border-radius:12px; cursor:pointer; box-shadow: var(--shadow);
+      transition: transform .06s ease, background .2s;
+    }
+    button:hover{ transform: translateY(-1px); }
+    button:active{ transform: translateY(0); }
+    button[disabled]{ opacity:.5; cursor:not-allowed; }
+
+    .game{
+      width: min(1100px, 96vw); height: calc(100vh - 140px);
+      display:grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap:16px;
+      padding: 18px; box-sizing:border-box; overflow:auto;
+    }
+
+    .bottle{
+      align-self:end; justify-self:center; width:110px; height:310px; position:relative; display:flex; align-items:flex-end;
+      border-radius: 0 0 var(--radius) var(--radius);
+      background: linear-gradient(#2b2f4c, #191c31);
+      border: 2px solid #39406b;
+      box-shadow: var(--shadow);
+      padding: 8px; box-sizing:border-box;
+      cursor:pointer; user-select:none;
+    }
+    .bottle::before{ /* 瓶口 */
+      content:''; position:absolute; top:-24px; left:50%; transform:translateX(-50%);
+      width: 80px; height: 26px; border-radius: 14px; border: 2px solid #39406b; background:#1b1f36;
+    }
+    .slots{ position:absolute; inset:8px; display:flex; flex-direction:column; justify-content:flex-end; gap:6px; }
+    .slot{ height: calc((100% - 6px * (var(--cap) - 1)) / var(--cap)); background: var(--slot); border-radius:10px; border:1px solid rgba(255,255,255,.06); overflow:hidden; }
+    .liquid{ width:100%; height:100%; transition: transform .18s ease; transform-origin: center bottom; }
+
+    .bottle.empty .slot{ opacity:.7 }
+    .bottle.selected{ outline: 3px solid var(--accent); outline-offset:4px; }
+    .bottle.valid-target{ outline: 3px solid var(--good); outline-offset:4px; }
+    .bottle.invalid-target{ outline: 3px solid var(--bad); outline-offset:4px; }
+
+    footer{ color: var(--muted); font-size:13px; padding-bottom:14px; }
+    .pill{ display:inline-block; padding:4px 10px; border-radius:999px; background:#1b2140; border:1px solid rgba(255,255,255,.1); margin-left:6px; }
+    .msg{ margin-left:6px; }
+
+    .level-config{ display:flex; gap:10px; align-items:center; }
+    .level-config input{ width:56px; padding:6px 8px; background:#14172a; color:#fff; border:1px solid rgba(255,255,255,.15); border-radius:10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="title">水排序瓶子 <b>Water Sort</b></div>
+    <div class="controls">
+      <div class="level-config">
+        颜色数 <input id="colorsInput" type="number" min="3" max="12" value="6"/>
+        空瓶数 <input id="emptiesInput" type="number" min="1" max="4" value="2"/>
+      </div>
+      <button id="newBtn">新关卡</button>
+      <button id="resetBtn">重开本关</button>
+      <button id="undoBtn" disabled>撤销</button>
+    </div>
+  </header>
+
+  <main class="game" id="game"></main>
+
+  <footer>
+    <span class="pill" id="status">准备开始</span>
+    <span class="msg" id="msg"></span>
+  </footer>
+
+  <template id="bottleTmpl">
+    <div class="bottle" tabindex="0" role="button" aria-label="bottle">
+      <div class="slots"></div>
+    </div>
+  </template>
+
+  <script>
+  // ================= 工具与数据结构 =================
+  const CAP = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cap')) || 4;
+  const gameEl = document.getElementById('game');
+  const statusEl = document.getElementById('status');
+  const msgEl = document.getElementById('msg');
+  const undoBtn = document.getElementById('undoBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const newBtn = document.getElementById('newBtn');
+  const colorsInput = document.getElementById('colorsInput');
+  const emptiesInput = document.getElementById('emptiesInput');
+
+  const PALETTE = [
+    '#ff7675','#74b9ff','#55efc4','#ffeaa7','#fd79a8','#a29bfe','#81ecec','#fab1a0',
+    '#fdcb6e','#00b894','#0984e3','#e84393'
+  ];
+
+  function rng(seed){ // 32-bit LCG for reproducible levels
+    let s = seed >>> 0;
+    return () => (s = (s * 1664525 + 1013904223) >>> 0) / 0x100000000;
+  }
+  function shuffle(arr, rnd=Math.random){
+    for(let i=arr.length-1;i>0;i--){
+      const j = Math.floor(rnd()*(i+1));
+      [arr[i],arr[j]]=[arr[j],arr[i]];
+    }
+    return arr;
+  }
+  function cloneState(state){ return state.map(col=>col.slice()); }
+
+  // 状态结构：Array<Column>，每个 Column 是数组，底部在索引0，顶部在末尾；长度<=CAP
+  // 规则：只能把顶部连续同色的一段，倒到空或同色顶部的目标，且不能溢出。
+
+  let initialState = null;
+  let state = null;  // 当前状态
+  let undoStack = []; // 保存之前的状态
+  let selected = null; // 被选中的瓶子索引
+  let currentSeed = Math.floor(Math.random()*1e9);
+
+  function generateLevel(nColors=6, nEmpties=2, seed=currentSeed){
+    const rnd = rng(seed);
+    const colors = PALETTE.slice(0, Math.max(3, Math.min(nColors, PALETTE.length)));
+    const totalBottles = colors.length + Math.max(1, Math.min(nEmpties, 6));
+    // 构造装满的颜色块
+    const blobs = [];
+    for(let c=0;c<colors.length;c++) for(let k=0;k<CAP;k++) blobs.push(c);
+    shuffle(blobs, rnd);
+    const cols = Array.from({length: totalBottles}, ()=>[]);
+    // 先填满前 nColors 瓶，把混合颜色分配进去
+    for(let i=0;i<colors.length*CAP;i++){
+      cols[i % colors.length].push(blobs[i]);
+    }
+    // 其余是空瓶
+    return {state: cols, seed, colors};
+  }
+
+  function isComplete(st){
+    return st.every(col => col.length===0 || (col.length===CAP && col.every(x=>x===col[0])));
+  }
+
+  function topRun(col){
+    if(col.length===0) return {color:null, count:0};
+    const c = col[col.length-1];
+    let k=1; for(let i=col.length-2;i>=0;i--){ if(col[i]!==c) break; k++; }
+    return {color:c, count:k};
+  }
+
+  function canPour(from, to){
+    if(from===to) return {ok:false, reason:'同一瓶'};
+    const A = state[from], B = state[to];
+    if(!A || !B) return {ok:false};
+    if(A.length===0) return {ok:false, reason:'空瓶'};
+    if(B.length===CAP) return {ok:false, reason:'满了'};
+    const {color, count} = topRun(A);
+    const space = CAP - B.length;
+    if(B.length===0) return {ok:true, amount: Math.min(count, space)};
+    const topB = B[B.length-1];
+    if(topB!==color) return {ok:false, reason:'颜色不同'};
+    return {ok:true, amount: Math.min(count, space)};
+  }
+
+  function doPour(from, to, amount){
+    if(amount<=0) return false;
+    // 保存备份用于撤销
+    undoStack.push(cloneState(state));
+    undoBtn.disabled = false;
+    const A = state[from], B = state[to];
+    for(let i=0;i<amount;i++) B.push(A.pop());
+    render();
+    if(isComplete(state)) {
+      statusEl.textContent = '✔ 过关！';
+      statusEl.style.background = 'linear-gradient(90deg, #2dd4bf, #34d399)';
+      msgEl.textContent = `恭喜完成！可以点“新关卡”继续挑战。`;
+    } else {
+      statusEl.textContent = '进行中…';
+      statusEl.style.background = '';
+      msgEl.textContent = '';
+    }
+    return true;
+  }
+
+  // =============== 渲染与交互 ===============
+  function render(){
+    gameEl.innerHTML = '';
+    const colors = PALETTE;
+    state.forEach((col, idx)=>{
+      const node = document.getElementById('bottleTmpl').content.firstElementChild.cloneNode(true);
+      node.dataset.index = idx;
+      const slots = node.querySelector('.slots');
+      // 先填充空槽
+      for(let i=0;i<CAP;i++){
+        const s = document.createElement('div'); s.className='slot';
+        if(i < CAP - col.length){
+          // 空的
+        }else{
+          const colorIdx = col[i - (CAP - col.length)];
+          const liq = document.createElement('div');
+          liq.className='liquid';
+          liq.style.background = colors[colorIdx % colors.length];
+          slots.appendChild(s);
+          s.appendChild(liq);
+          continue;
+        }
+        slots.appendChild(s);
+      }
+      if(col.length===0) node.classList.add('empty');
+      if(selected===idx) node.classList.add('selected');
+      gameEl.appendChild(node);
+    });
+  }
+
+  function clearHighlights(){
+    document.querySelectorAll('.bottle').forEach(b=>{
+      b.classList.remove('valid-target','invalid-target');
+    });
+  }
+
+  function onBottleClick(idx){
+    if(selected==null){
+      if(state[idx].length===0){ blink(idx, 'invalid-target'); return; }
+      selected = idx; render();
+      statusEl.textContent = `选择了瓶子 ${idx+1}，请选择倒入目标`;
+      return;
+    }
+    if(selected===idx){ // 取消选择
+      selected = null; render(); statusEl.textContent = '选择已取消'; return;
+    }
+    const {ok, amount} = canPour(selected, idx);
+    if(ok && amount>0){ doPour(selected, idx, amount); selected = null; render(); }
+    else { blink(idx, 'invalid-target'); }
+  }
+
+  function blink(idx, cls){
+    const el = [...document.querySelectorAll('.bottle')][idx];
+    el.classList.add(cls);
+    setTimeout(()=> el.classList.remove(cls), 220);
+  }
+
+  function setupEvents(){
+    gameEl.addEventListener('click', e=>{
+      const bottle = e.target.closest('.bottle');
+      if(!bottle) return;
+      const idx = parseInt(bottle.dataset.index);
+      if(selected!=null){
+        const {ok} = canPour(selected, idx);
+        clearHighlights();
+        bottle.classList.add(ok? 'valid-target':'invalid-target');
+      }
+      onBottleClick(idx);
+    });
+
+    // 键盘支持：箭头/WSAD 移动选择，回车确认
+    window.addEventListener('keydown', (e)=>{
+      const total = state.length;
+      if(['ArrowLeft','a','A'].includes(e.key)){
+        if(selected==null){ selected = 0; render(); }
+        else { selected = (selected - 1 + total) % total; render(); }
+      } else if(['ArrowRight','d','D'].includes(e.key)){
+        if(selected==null){ selected = 0; render(); }
+        else { selected = (selected + 1) % total; render(); }
+      } else if(e.key==='Escape'){
+        selected = null; render();
+      } else if(e.key==='Enter'){
+        if(selected!=null){
+          // 尝试倒入下一个可行目标
+          for(let i=1;i<=total;i++){
+            const j = (selected + i) % total;
+            const q = canPour(selected, j);
+            if(q.ok && q.amount>0){ doPour(selected, j, q.amount); selected=null; render(); break; }
+          }
+        }
+      }
+    });
+
+    undoBtn.onclick = () => {
+      if(undoStack.length===0) return;
+      state = undoStack.pop();
+      undoBtn.disabled = undoStack.length===0;
+      selected = null; render();
+      statusEl.textContent = '已撤销';
+    };
+
+    resetBtn.onclick = () => { if(initialState){ state = cloneState(initialState); undoStack.length=0; undoBtn.disabled=true; selected=null; render(); statusEl.textContent='已重开本关'; msgEl.textContent=''; }};
+
+    newBtn.onclick = () => {
+      const nc = clamp(parseInt(colorsInput.value)||6, 3, PALETTE.length);
+      const ne = clamp(parseInt(emptiesInput.value)||2, 1, 6);
+      currentSeed = Math.floor(Math.random()*1e9);
+      newLevel(nc, ne, currentSeed);
+    };
+  }
+
+  function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+  function newLevel(nColors, nEmpties, seed){
+    const {state: st} = generateLevel(nColors, nEmpties, seed);
+    state = st; initialState = cloneState(state); undoStack.length=0; undoBtn.disabled=true; selected=null;
+    render();
+    statusEl.textContent = `关卡：颜色${nColors}，空瓶${nEmpties}`;
+    msgEl.textContent = '规则：只能把顶部连续同色倒到空瓶或同色上且不溢出。';
+  }
+
+  // 触控双击支持（移动端便捷倒水：点源再点目标）
+  // 已通过 click 事件覆盖，额外无需处理。
+
+  // 启动
+  setupEvents();
+  newLevel(parseInt(colorsInput.value), parseInt(emptiesInput.value), currentSeed);
+  </script>
+</body>
+</html>
