@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>20x20 可点格子（带圆形笔刷）</title>
+  <style>
+    body{margin:0;background:#111;display:flex;justify-content:center;align-items:center;height:100vh;font-family:system-ui}
+    .panel{background:#fff;padding:12px;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,0.4);width:740px}
+    .top{display:flex;align-items:center;gap:12px}
+    canvas{display:block;cursor:pointer;touch-action:none;margin-top:8px;border:1px solid #ddd}
+    select,input{font-size:14px}
+    .info{color:#666;font-size:13px}
+  </style>
+</head>
+<body>
+<div class="panel">
+  <div class="top">
+    <div>
+      图形：
+      <select id="shapeSel">
+        <option value="1">1 绿色</option>
+        <option value="2">2 灰色</option>
+        <option value="3">3 横线</option>
+        <option value="4">4 竖线</option>
+        <option value="5">5 曲线 上→右</option>
+        <option value="6">6 曲线 右→下</option>
+        <option value="7">7 曲线 下→左</option>
+        <option value="8">8 曲线 左→上</option>
+      </select>
+    </div>
+
+    <div>
+      笔刷大小：
+      <input id="brush" type="range" value="1" min="1" max="10" style="width:160px" />
+      <span id="brushVal" class="info">1</span>
+    </div>
+
+    <div class="info">按住并拖动画笔（支持鼠标 / 触控 / 笔）</div>
+  </div>
+
+  <canvas id="c" width="640" height="640"></canvas>
+</div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const shapeSel = document.getElementById('shapeSel');
+  const brush = document.getElementById('brush');
+  const brushVal = document.getElementById('brushVal');
+
+  const DPR = Math.max(1, window.devicePixelRatio || 1);
+  const BASE = 640; // 逻辑像素
+  // 设置高 DPI
+  canvas.style.width = BASE + 'px';
+  canvas.style.height = BASE + 'px';
+  canvas.width = Math.round(BASE * DPR);
+  canvas.height = Math.round(BASE * DPR);
+  ctx.scale(DPR, DPR);
+
+  const ROWS = 20, COLS = 20;
+  const cellSize = BASE / COLS; // 32
+
+  // 初始为1（绿色）
+  const state = Array.from({length:ROWS}, () => Array.from({length:COLS}, () => 1));
+
+  function draw(){
+    ctx.clearRect(0,0,BASE,BASE);
+
+    for(let r=0;r<ROWS;r++){
+      for(let c=0;c<COLS;c++){
+        const s = state[r][c];
+        const x = c*cellSize, y = r*cellSize;
+        const cx = x + cellSize/2, cy = y + cellSize/2;
+
+        // 填充
+        if(s === 1){ ctx.fillStyle = '#2ecc71'; ctx.fillRect(x+1, y+1, cellSize-2, cellSize-2); }
+        else if(s === 2){ ctx.fillStyle = '#bdc3c7'; ctx.fillRect(x+1, y+1, cellSize-2, cellSize-2); }
+
+        // 线条/曲线
+        ctx.save();
+        ctx.strokeStyle = '#222';
+        ctx.lineWidth = Math.max(1, cellSize * 0.08);
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+        const pad = cellSize * 0.06;
+        function edgeMid(side){
+          switch(side){
+            case 'top': return [x + cellSize/2, y];
+            case 'right': return [x + cellSize, y + cellSize/2];
+            case 'bottom': return [x + cellSize/2, y + cellSize];
+            case 'left': return [x, y + cellSize/2];
+          }
+        }
+
+        if(s === 3){ ctx.beginPath(); ctx.moveTo(x + pad, cy); ctx.lineTo(x + cellSize - pad, cy); ctx.stroke(); }
+        else if(s === 4){ ctx.beginPath(); ctx.moveTo(cx, y + pad); ctx.lineTo(cx, y + cellSize - pad); ctx.stroke(); }
+        else if(s >=5 && s <=8){
+          let sx, sy, ex, ey;
+          if(s === 5){ [sx,sy]=edgeMid('top'); [ex,ey]=edgeMid('right'); }
+          if(s === 6){ [sx,sy]=edgeMid('right'); [ex,ey]=edgeMid('bottom'); }
+          if(s === 7){ [sx,sy]=edgeMid('bottom'); [ex,ey]=edgeMid('left'); }
+          if(s === 8){ [sx,sy]=edgeMid('left'); [ex,ey]=edgeMid('top'); }
+
+          if(sy === y) sy += pad; if(sy === y + cellSize) sy -= pad;
+          if(sx === x) sx += pad; if(sx === x + cellSize) sx -= pad;
+          if(ey === y) ey += pad; if(ey === y + cellSize) ey -= pad;
+          if(ex === x) ex += pad; if(ex === x + cellSize) ex -= pad;
+
+          ctx.beginPath(); ctx.moveTo(sx, sy); ctx.quadraticCurveTo(cx, cy, ex, ey); ctx.stroke();
+        }
+
+        ctx.restore();
+      }
+    }
+
+    // 网格线（单像素对齐）
+    ctx.strokeStyle = '#ddd'; ctx.lineWidth = 1;
+    for(let i=0;i<=COLS;i++){ const x=i*cellSize+0.5; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,BASE); ctx.stroke(); }
+    for(let j=0;j<=ROWS;j++){ const y=j*cellSize+0.5; ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(BASE,y); ctx.stroke(); }
+  }
+
+  function getCellFromPointClient(clientX, clientY){
+    const rect = canvas.getBoundingClientRect();
+    // 将 client 坐标转换到逻辑坐标（0..BASE）
+    const x = (clientX - rect.left) / rect.width * BASE;
+    const y = (clientY - rect.top) / rect.height * BASE;
+    const col = Math.floor(x / cellSize);
+    const row = Math.floor(y / cellSize);
+    return {row, col, x, y};
+  }
+
+  // 圆形笔刷：以单元格为单位半径 b
+  function applyBrushAtPoint(clientX, clientY){
+    const {row, col, x, y} = getCellFromPointClient(clientX, clientY);
+    if(row < 0 || row >= ROWS || col < 0 || col >= COLS) return;
+    const b = Math.max(1, Math.floor(parseInt(brush.value) || 1));
+    // 中心格子的中心坐标
+    const centerX = (col + 0.5) * cellSize;
+    const centerY = (row + 0.5) * cellSize;
+    // 以格子为单位的半径
+    const radius = b * cellSize;
+
+    // 遍历影响的格子范围，使用圆形判断
+    const minR = Math.max(0, Math.floor((centerY - radius) / cellSize));
+    const maxR = Math.min(ROWS-1, Math.floor((centerY + radius) / cellSize));
+    const minC = Math.max(0, Math.floor((centerX - radius) / cellSize));
+    const maxC = Math.min(COLS-1, Math.floor((centerX + radius) / cellSize));
+
+    for(let rr = minR; rr <= maxR; rr++){
+      for(let cc = minC; cc <= maxC; cc++){
+        const cellCenterX = (cc + 0.5) * cellSize;
+        const cellCenterY = (rr + 0.5) * cellSize;
+        const dx = cellCenterX - centerX;
+        const dy = cellCenterY - centerY;
+        if(Math.sqrt(dx*dx + dy*dy) <= radius - (cellSize*0.5)){
+          state[rr][cc] = parseInt(shapeSel.value);
+        }
+      }
+    }
+  }
+
+  // 指针事件支持（鼠标 / 触摸 / 笔）
+  let drawing = false;
+  function onPointerDown(e){
+    drawing = true; canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    applyBrushAtPoint(e.clientX, e.clientY); draw();
+  }
+  function onPointerMove(e){
+    // brush preview
+    draw();
+    const {x, y} = getCellFromPointClient(e.clientX, e.clientY);
+    const b = Math.max(1, Math.floor(parseInt(brush.value) || 1));
+    const radius = b * cellSize;
+    // 在画布上画出圆形预览
+    ctx.save(); ctx.beginPath(); ctx.lineWidth = 2; ctx.setLineDash([6,4]); ctx.strokeStyle = 'red';
+    ctx.arc(x, y, radius, 0, Math.PI*2); ctx.stroke(); ctx.restore();
+
+    if(drawing){ applyBrushAtPoint(e.clientX, e.clientY); draw(); }
+  }
+  function onPointerUp(e){ drawing = false; try{ canvas.releasePointerCapture && canvas.releasePointerCapture(e.pointerId); }catch(e){} }
+
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+
+  // 更新 brush 文本显示
+  brush.addEventListener('input', ()=>{ brushVal.textContent = brush.value; });
+
+  // 防止触摸滚动
+  canvas.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
+
+  // 初始绘制
+  draw();
+})();
+</script>
+</body>
+</html>
