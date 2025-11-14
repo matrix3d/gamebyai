@@ -62,10 +62,10 @@
 
   // 自动轨道判断
   function autoRailShape(r, c){
-    const top    = r < 0        || state[r-1][c] !== 9;
+    const top    = r < 1        || state[r-1][c] !== 9;
     const right  = c >= COLS-1   || state[r][c+1] !== 9;
     const bottom = r >= ROWS-1   || state[r+1][c] !== 9;
-    const left   = c < 0        || state[r][c-1] !== 9;
+    const left   = c < 1        || state[r][c-1] !== 9;
 
     if(top && right) return 7;    // 上→右
     if(right && bottom) return 8; // 右→下
