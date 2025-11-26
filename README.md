@@ -2,6 +2,13 @@
 
 
 
+<a href="https://matrix3d.github.io/gamebyai/placepepon.html">placepepon</a> 
+
+
+
+<a href="https://matrix3d.github.io/gamebyai/placepepon2.html">placepepon2</a> 
+
+
 <a href="https://matrix3d.github.io/gamebyai/ai_studio_hundouluo.html">魂斗罗</a> 
 
 <a href="https://matrix3d.github.io/gamebyai/saolei.html">扫雷</a> 
