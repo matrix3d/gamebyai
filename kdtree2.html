@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Canvas 2D 空间搜索算法对比 (NN vs Range)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #111; font-family: 'Segoe UI', sans-serif; color: #eee; }
+        canvas { display: block; }
+        
+        #ui-panel {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 320px;
+            background: rgba(30, 30, 30, 0.9);
+            backdrop-filter: blur(5px);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #444;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+            user-select: none;
+        }
+
+        h3 { margin: 0 0 10px 0; font-size: 16px; color: #fff; border-bottom: 1px solid #555; padding-bottom: 5px; }
+        
+        .control-group { margin-bottom: 12px; }
+        label { display: block; font-size: 12px; color: #aaa; margin-bottom: 4px; }
+        
+        select, input[type=range] {
+            width: 100%;
+            background: #222;
+            color: white;
+            border: 1px solid #555;
+            padding: 4px;
+            border-radius: 4px;
+        }
+
+        .stats { font-family: monospace; font-size: 12px; color: #4f4; margin-top: 15px; }
+        .stats span { display: block; margin-bottom: 2px; }
+        .legend { margin-top: 10px; font-size: 12px; }
+        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="ui-panel">
+    <h3>Canvas 2D 算法对比</h3>
+    
+    <div class="control-group">
+        <label>算法模式:</label>
+        <select id="modeSelect">
+            <option value="nearest">最近邻搜索 (Nearest Neighbor)</option>
+            <option value="range" selected>范围搜索 (Range Query)</option>
+        </select>
+    </div>
+
+    <div class="control-group">
+        <label>选择搜索算法:</label>
+        <select id="algoSelect">
+            <option value="bruteforce">暴力循环 (Brute Force)</option>
+            <option value="kdtree" selected>KD-Tree</option>
+            <option value="quadtree">QuadTree (四叉树)</option>
+            <option value="grid">Uniform Grid (均匀网格)</option>
+        </select>
+    </div>
+
+    <div class="control-group">
+        <label>单方单位数量: <span id="countVal">100</span></label>
+        <input type="range" id="countRange" min="10" max="15000" step="10" value="100">
+    </div>
+
+    <div class="control-group">
+        <label>搜索半径 (R): <span id="rangeVal">150</span> px</label>
+        <input type="range" id="rangeRange" min="50" max="400" step="10" value="150">
+    </div>
+
+    <div class="legend">
+        <div><span class="dot" style="background:#ff4d4d"></span>阵营 A (目标 B)</div>
+        <div><span class="dot" style="background:#4d79ff"></span>阵营 B (目标 A)</div>
+    </div>
+
+    <div class="stats">
+        <span id="fpsDisplay">FPS: 0</span>
+        <span id="timeDisplay">Algo Time: 0 ms</span>
+        <span id="entityDisplay">Total Units: 200</span>
+    </div>
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+// ==========================================
+// 1. 基础类与配置
+// ==========================================
+const CONFIG = {
+    radius: 3,
+    speed: 1.5,
+    searchRadius: 150,
+    gridCellSize: 80 
+};
+
+class Point {
+    constructor(x, y, faction, id) {
+        this.id = id;
+        this.x = x;
+        this.y = y;
+        this.faction = faction;
+        const angle = Math.random() * Math.PI * 2;
+        this.vx = Math.cos(angle) * CONFIG.speed;
+        this.vy = Math.sin(angle) * CONFIG.speed;
+        this.foundTargets = []; // 存储所有找到的目标
+    }
+
+    update(w, h) {
+        this.x += this.vx;
+        this.y += this.vy;
+        if (this.x < 0 || this.x > w) this.vx *= -1;
+        if (this.y < 0 || this.y > h) this.vy *= -1;
+        this.x = Math.max(0, Math.min(w, this.x));
+        this.y = Math.max(0, Math.min(h, this.y));
+        this.foundTargets = []; // Reset
+    }
+}
+
+// 辅助：距离平方
+function distSq(p1, p2) {
+    return (p1.x - p2.x)**2 + (p1.y - p2.y)**2;
+}
+
+// ==========================================
+// 2. 算法实现 (所有算法都实现 findNearest 和 rangeQuery)
+// ==========================================
+
+// --- 算法 1: 暴力法 (Brute Force) ---
+class BruteForceSolver {
+    constructor() {}
+    build(units) {} 
+    
+    findNearest(target, candidates) {
+        let best = null;
+        let minSq = Infinity;
+        for (const other of candidates) {
+            const d2 = distSq(target, other);
+            if (d2 < minSq) {
+                minSq = d2;
+                best = other;
+            }
+        }
+        return best;
+    }
+
+    rangeQuery(target, candidates, rSq) {
+        const results = [];
+        for (const other of candidates) {
+            if (distSq(target, other) <= rSq) {
+                results.push(other);
+            }
+        }
+        return results;
+    }
+}
+
+// --- 算法 2: KD-Tree ---
+class KDNode {
+    constructor(point, left, right, axis) {
+        this.point = point;
+        this.left = left;
+        this.right = right;
+        this.axis = axis;
+    }
+}
+class KDTreeSolver {
+    constructor() { this.root = null; }
+    
+    build(points) { this.root = this._buildTree([...points], 0); }
+    _buildTree(points, depth) {
+        if (points.length === 0) return null;
+        const axis = depth % 2;
+        points.sort((a, b) => axis === 0 ? a.x - b.x : a.y - b.y);
+        const mid = points.length >> 1;
+        return new KDNode(points[mid], this._buildTree(points.slice(0, mid), depth + 1), this._buildTree(points.slice(mid + 1), depth + 1), axis);
+    }
+
+    findNearest(target) {
+        if (!this.root) return null;
+        let best = { point: null, distSq: Infinity };
+        this._nearestSearch(this.root, target, best);
+        return best.point;
+    }
+
+    _nearestSearch(node, target, best) {
+        if (!node) return;
+        const d2 = distSq(node.point, target);
+        if (d2 < best.distSq) {
+            best.distSq = d2;
+            best.point = node.point;
+        }
+        const diff = node.axis === 0 ? target.x - node.point.x : target.y - node.point.y;
+        const near = diff < 0 ? node.left : node.right;
+        const far = diff < 0 ? node.right : node.left;
+        this._nearestSearch(near, target, best);
+        if (diff * diff < best.distSq) { 
+            this._nearestSearch(far, target, best);
+        }
+    }
+
+    rangeQuery(target, candidates, rSq) {
+        const results = [];
+        if (this.root) this._rangeSearch(this.root, target, rSq, results);
+        return results;
+    }
+
+    _rangeSearch(node, target, rSq, results) {
+        if (!node) return;
+        const d2 = distSq(node.point, target);
+        if (d2 <= rSq) results.push(node.point);
+
+        const diff = node.axis === 0 ? target.x - node.point.x : target.y - node.point.y;
+        const near = diff < 0 ? node.left : node.right;
+        const far = diff < 0 ? node.right : node.left;
+
+        this._rangeSearch(near, target, rSq, results);
+        if (diff * diff <= rSq) { 
+            this._rangeSearch(far, target, rSq, results);
+        }
+    }
+}
+
+// --- 算法 3: QuadTree (四叉树) ---
+class QuadNode {
+    constructor(x, y, w, h, capacity) {
+        this.bounds = {x, y, w, h};
+        this.capacity = capacity;
+        this.points = [];
+        this.divided = false;
+        this.children = []; 
+    }
+    
+    _contains(p) { return p.x >= this.bounds.x && p.x < this.bounds.x + this.bounds.w && p.y >= this.bounds.y && p.y < this.bounds.y + this.bounds.h; }
+    _distToRectSq(p) { 
+        let dx = Math.max(this.bounds.x - p.x, 0, p.x - (this.bounds.x + this.bounds.w));
+        let dy = Math.max(this.bounds.y - p.y, 0, p.y - (this.bounds.y + this.bounds.h));
+        return dx*dx + dy*dy;
+    }
+
+    insert(point) {
+        if (!this._contains(point)) return false;
+        if (this.points.length < this.capacity && !this.divided) { this.points.push(point); return true; }
+        if (!this.divided) {
+            const {x, y, w, h} = this.bounds;
+            const hw = w/2, hh = h/2;
+            this.children = [
+                new QuadNode(x, y, hw, hh, this.capacity), new QuadNode(x+hw, y, hw, hh, this.capacity),
+                new QuadNode(x, y+hh, hw, hh, this.capacity), new QuadNode(x+hw, y+hh, hw, hh, this.capacity)
+            ];
+            this.divided = true;
+            for (let p of this.points) { for (let child of this.children) child.insert(p); }
+            this.points = [];
+        }
+        for (let child of this.children) if (child.insert(point)) return true;
+        return false;
+    }
+
+    findNearest(target, best) {
+        if (this._distToRectSq(target) > best.distSq) return;
+
+        for (let p of this.points) {
+            const d2 = distSq(p, target);
+            if (d2 < best.distSq) {
+                best.distSq = d2;
+                best.point = p;
+            }
+        }
+        
+        if (this.divided) {
+            // 优化：可以根据目标点位置优先搜索包含目标点的子节点，这里简化为遍历
+            for (let child of this.children) child.findNearest(target, best);
+        }
+    }
+
+    rangeQuery(target, rSq, results) {
+        if (this._distToRectSq(target) > rSq) return; 
+
+        for (const p of this.points) {
+            if (distSq(p, target) <= rSq) results.push(p);
+        }
+        
+        if (this.divided) {
+            for (const child of this.children) child.rangeQuery(target, rSq, results);
+        }
+    }
+}
+
+class QuadTreeSolver {
+    constructor(w, h) { this.w = w; this.h = h; this.root = null; }
+    build(points) {
+        this.root = new QuadNode(0, 0, this.w, this.h, 4); // capacity 4
+        for (let p of points) this.root.insert(p);
+    }
+    findNearest(target) {
+        let best = { point: null, distSq: Infinity };
+        if (this.root) this.root.findNearest(target, best);
+        return best.point;
+    }
+    rangeQuery(target, candidates, rSq) {
+        const results = [];
+        if (this.root) this.root.rangeQuery(target, rSq, results);
+        return results;
+    }
+}
+
+// --- 算法 4: Uniform Grid (均匀网格/空间哈希) ---
+class GridSolver {
+    constructor(width, height, cellSize) {
+        this.width = width;
+        this.height = height;
+        this.cellSize = cellSize;
+        this.grid = new Map();
+    }
+
+    build(points) {
+        this.grid.clear();
+        for (let p of points) {
+            const key = this._getKey(p.x, p.y);
+            if (!this.grid.has(key)) this.grid.set(key, []);
+            this.grid.get(key).push(p);
+        }
+    }
+    
+    _getKey(x, y) {
+        const gx = Math.floor(x / this.cellSize);
+        const gy = Math.floor(y / this.cellSize);
+        return gx + "," + gy;
+    }
+
+    _getCellsInRadius(x, y, radius) {
+        const cells = [];
+        const minX = Math.floor((x - radius) / this.cellSize);
+        const maxX = Math.floor((x + radius) / this.cellSize);
+        const minY = Math.floor((y - radius) / this.cellSize);
+        const maxY = Math.floor((y + radius) / this.cellSize);
+
+        for (let gx = minX; gx <= maxX; gx++) {
+            for (let gy = minY; gy <= maxY; gy++) {
+                const key = gx + "," + gy;
+                const cell = this.grid.get(key);
+                if (cell) cells.push(...cell);
+            }
+        }
+        return cells;
+    }
+
+    findNearest(target) {
+        // Grid Nearest: Search locally (e.g., within 3x3 cells)
+        let best = null;
+        let minSq = Infinity;
+        
+        const localCandidates = this._getCellsInRadius(target.x, target.y, this.cellSize * 1.5); 
+
+        for (const p of localCandidates) {
+            const d2 = distSq(p, target);
+            if (d2 < minSq) {
+                minSq = d2;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    rangeQuery(target, candidates, rSq) {
+        const results = [];
+        const radius = Math.sqrt(rSq);
+        const potentialCandidates = this._getCellsInRadius(target.x, target.y, radius);
+
+        for (const p of potentialCandidates) {
+            if (distSq(p, target) <= rSq) {
+                results.push(p);
+            }
+        }
+        return results;
+    }
+}
+
+
+// ==========================================
+// 3. 主程序逻辑
+// ==========================================
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: false }); 
+let width, height;
+
+// State management
+const state = {
+    unitsA: [],
+    unitsB: [],
+    mode: 'range', 
+    algo: 'kdtree',
+    count: 100,
+    searchRadius: CONFIG.searchRadius,
+    solvers: {}, 
+};
+
+// Initialize units
+function spawnUnits() {
+    state.unitsA = [];
+    state.unitsB = [];
+    for (let i = 0; i < state.count; i++) {
+        state.unitsA.push(new Point(Math.random()*width, Math.random()*height, 'A', i));
+        state.unitsB.push(new Point(Math.random()*width, Math.random()*height, 'B', i));
+    }
+    document.getElementById('entityDisplay').innerText = `Total Units: ${state.count * 2}`;
+}
+
+// Window resize handler
+function resize() {
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    
+    // Reinitialize dimension-dependent solvers
+    state.solvers = {
+        bruteforce: new BruteForceSolver(),
+        kdtree: new KDTreeSolver(),
+        quadtree: new QuadTreeSolver(width, height),
+        grid: new GridSolver(width, height, CONFIG.gridCellSize)
+    };
+}
+
+// UI events
+document.getElementById('modeSelect').addEventListener('change', (e) => state.mode = e.target.value);
+document.getElementById('algoSelect').addEventListener('change', (e) => state.algo = e.target.value);
+document.getElementById('countRange').addEventListener('input', (e) => {
+    state.count = parseInt(e.target.value);
+    document.getElementById('countVal').innerText = state.count;
+    spawnUnits();
+});
+document.getElementById('rangeRange').addEventListener('input', (e) => {
+    state.searchRadius = parseInt(e.target.value);
+    document.getElementById('rangeVal').innerText = state.searchRadius;
+});
+
+
+// Main loop
+let lastTime = 0;
+let frameCount = 0;
+let lastFpsTime = 0;
+
+function loop(timestamp) {
+    // 1. Update unit positions (CPU)
+    state.unitsA.forEach(u => u.update(width, height));
+    state.unitsB.forEach(u => u.update(width, height));
+
+    const tStart = performance.now();
+    const rSq = state.searchRadius * state.searchRadius;
+    
+    // 2. Algorithm processing (CPU)
+    const currentSolver = state.solvers[state.algo];
+
+    // --- A 阵营寻找 B 目标 ---
+    // 1. 构建 B 目标的结构
+    if (state.algo !== 'bruteforce') currentSolver.build(state.unitsB); 
+    
+    // 2. A 搜索
+    state.unitsA.forEach(u => {
+        if (state.mode === 'nearest') {
+            const nearest = currentSolver.findNearest(u, state.unitsB);
+            u.foundTargets = nearest ? [nearest] : [];
+        } else { // range
+            u.foundTargets = currentSolver.rangeQuery(u, state.unitsB, rSq); 
+        }
+    });
+
+    // --- B 阵营寻找 A 目标 ---
+    // 1. 构建 A 目标的结构
+    if (state.algo !== 'bruteforce') currentSolver.build(state.unitsA); 
+    
+    // 2. B 搜索
+    state.unitsB.forEach(u => {
+        if (state.mode === 'nearest') {
+            const nearest = currentSolver.findNearest(u, state.unitsA);
+            u.foundTargets = nearest ? [nearest] : [];
+        } else { // range
+            u.foundTargets = currentSolver.rangeQuery(u, state.unitsA, rSq); 
+        }
+    });
+
+
+    const tEnd = performance.now();
+    const logicTime = tEnd - tStart;
+
+    // 3. 渲染
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, width, height);
+
+    // 绘制搜索范围圆 (Range Query 模式下)
+    if (state.mode === 'range') {
+        ctx.strokeStyle = '#5ff';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        // 只在 A 阵营画圆，避免画面过于混乱
+        state.unitsA.forEach(u => { ctx.moveTo(u.x + state.searchRadius, u.y); ctx.arc(u.x, u.y, state.searchRadius, 0, Math.PI*2); });
+        ctx.stroke();
+    }
+
+
+    // 绘制连线 (先画线，避免覆盖点)
+    ctx.lineWidth = 1;
+    
+    // 绘制 A 的连线
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(255, 77, 77, 0.2)';
+    state.unitsA.forEach(u => {
+        u.foundTargets.forEach(target => {
+            ctx.moveTo(u.x, u.y); 
+            ctx.lineTo(target.x, target.y);
+        });
+    });
+    ctx.stroke();
+
+    // 绘制 B 的连线
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(77, 121, 255, 0.2)';
+    state.unitsB.forEach(u => {
+        u.foundTargets.forEach(target => {
+            ctx.moveTo(u.x, u.y); 
+            ctx.lineTo(target.x, target.y);
+        });
+    });
+    ctx.stroke();
+
+    
+    // 绘制点
+    // A 阵营
+    ctx.fillStyle = '#ff4d4d';
+    ctx.beginPath();
+    state.unitsA.forEach(u => { ctx.moveTo(u.x, u.y); ctx.arc(u.x, u.y, CONFIG.radius, 0, Math.PI*2); });
+    ctx.fill();
+
+    // B 阵营
+    ctx.fillStyle = '#4d79ff';
+    ctx.beginPath();
+    state.unitsB.forEach(u => { ctx.moveTo(u.x, u.y); ctx.arc(u.x, u.y, CONFIG.radius, 0, Math.PI*2); });
+    ctx.fill();
+
+    // 4. 统计信息
+    frameCount++;
+    if (timestamp - lastFpsTime >= 1000) {
+        document.getElementById('fpsDisplay').innerText = `FPS: ${frameCount}`;
+        document.getElementById('timeDisplay').innerText = `Algo Time: ${logicTime.toFixed(2)} ms`;
+        frameCount = 0;
+        lastFpsTime = timestamp;
+    }
+
+    requestAnimationFrame(loop);
+}
+
+// 启动
+window.addEventListener('resize', resize);
+resize();
+spawnUnits();
+requestAnimationFrame(loop);
+
+</script>
+</body>
+</html>
