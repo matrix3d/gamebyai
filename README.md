@@ -1,6 +1,6 @@
 # html5gameByAI
 
-<a href="https://matrix3d.github.io/gamebyai/winxin/index.html">weixin</a> 
+<a href="https://matrix3d.github.io/gamebyai/weixin/index.html">weixin</a> 
 
 <a href="https://matrix3d.github.io/gamebyai/macos.html">macos.html</a> 
 
