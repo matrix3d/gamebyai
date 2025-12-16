@@ -434,3 +434,110 @@ body {
     color: #e0e0e0;
     font-size: 100px;
 }
+
+/* Mobile Responsiveness */
+.mobile-back-btn {
+    display: none;
+}
+
+@media (max-width: 768px) {
+    body {
+        background-color: #fff;
+    }
+
+    .app-container {
+        max-width: 100%;
+        max-height: 100%;
+        border-radius: 0;
+        box-shadow: none;
+        flex-direction: column-reverse; /* Sidebar at bottom */
+    }
+
+    /* Sidebar becomes Bottom Tab Bar */
+    .sidebar {
+        width: 100%;
+        height: 55px;
+        flex-direction: row;
+        padding: 0;
+        justify-content: space-around;
+        border-top: 1px solid #e7e7e7;
+        background: #f7f7f7;
+        flex-shrink: 0;
+    }
+
+    .nav-icons {
+        flex-direction: row;
+        width: 100%;
+        justify-content: space-around;
+        gap: 0;
+        align-items: center;
+    }
+
+    .nav-item {
+        padding: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+    }
+
+    .user-avatar, .nav-bottom {
+        display: none;
+    }
+
+    /* List Panel takes full space */
+    .list-panel {
+        width: 100%;
+        flex: 1;
+        border-right: none;
+    }
+
+    /* Chat Panel - Full Screen Overlay */
+    .chat-panel {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 100;
+        transform: translateX(100%); /* Hidden by default */
+        transition: transform 0.3s ease;
+        background-color: #f5f5f5;
+    }
+
+    .app-container.mobile-chat-active .chat-panel {
+        transform: translateX(0);
+    }
+
+    .mobile-back-btn {
+        display: block;
+        margin-right: 15px;
+        font-size: 18px;
+        cursor: pointer;
+    }
+    
+    /* Adjust Chat Input for Mobile */
+    .chat-input-area {
+        height: auto;
+        min-height: 50px;
+        padding-bottom: 10px;
+    }
+    
+    .toolbar {
+        padding: 10px;
+    }
+    
+    .input-box {
+        padding: 0 10px;
+        height: 40px;
+    }
+    
+    .action-bar {
+        padding: 5px 10px;
+    }
+    
+    .tip {
+        display: none; /* Hide tip on mobile */
+    }
+}
+

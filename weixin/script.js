@@ -124,6 +124,9 @@ function switchChat(contactId) {
     
     // Ensure we are on the chat tab
     showTab('chat');
+
+    // Mobile: Show chat panel
+    document.querySelector('.app-container').classList.add('mobile-chat-active');
 }
 
 // Start Chat (from contact list)
@@ -269,6 +272,14 @@ function setupEventListeners() {
     navContacts.onclick = () => showTab('contacts');
 
     sendBtn.onclick = sendMessage;
+
+    // Mobile Back Button
+    const mobileBackBtn = document.getElementById('mobile-back-btn');
+    if (mobileBackBtn) {
+        mobileBackBtn.onclick = () => {
+            document.querySelector('.app-container').classList.remove('mobile-chat-active');
+        };
+    }
 
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.ctrlKey) {
