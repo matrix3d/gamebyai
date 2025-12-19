@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>位图水波纹效果</title>
+<style>
+  body { margin: 0; background: #222; display: flex; justify-content: center; align-items: center; height: 100vh; }
+  canvas { border: 1px solid #555; }
+</style>
+</head>
+<body>
+<canvas id="rippleCanvas" width="400" height="400"></canvas>
+<script>
+const canvas = document.getElementById('rippleCanvas');
+const ctx = canvas.getContext('2d');
+const width = canvas.width;
+const height = canvas.height;
+
+// 波纹高度图
+let current = new Array(width * height).fill(0);
+let previous = new Array(width * height).fill(0);
+const damping = 0.99; // 衰减因子
+
+// 点击添加波峰
+canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor(e.clientX - rect.left);
+    const y = Math.floor(e.clientY - rect.top);
+    const radius = 5;
+    for(let dy = -radius; dy <= radius; dy++){
+        for(let dx = -radius; dx <= radius; dx++){
+            const nx = x + dx;
+            const ny = y + dy;
+            if(nx >=0 && nx < width && ny >=0 && ny < height){
+                previous[ny * width + nx] = 255;
+            }
+        }
+    }
+});
+
+// 渲染函数
+function render(){
+    const imageData = ctx.createImageData(width, height);
+    const data = imageData.data;
+
+    // 更新高度图
+    for(let y=1; y<height-1; y++){
+        for(let x=1; x<width-1; x++){
+            const idx = y * width + x;
+            const newHeight = ((previous[idx-1] + previous[idx+1] + previous[idx-width] + previous[idx+width]) / 2) - current[idx];
+            current[idx] = newHeight * damping;
+            const color = Math.max(0, Math.min(255, current[idx]));
+            data[idx*4] = 0;      // R
+            data[idx*4+1] = 150;  // G
+            data[idx*4+2] = 255;  // B
+            data[idx*4+3] = color; // Alpha
+        }
+    }
+
+    // 交换数组
+    [current, previous] = [previous, current];
+
+    ctx.putImageData(imageData, 0, 0);
+    requestAnimationFrame(render);
+}
+
+render();
+</script>
+</body>
+</html>
