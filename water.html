@@ -19,7 +19,7 @@ const height = canvas.height;
 // 波纹高度图
 let current = new Array(width * height).fill(0);
 let previous = new Array(width * height).fill(0);
-const damping = 0.99; // 衰减因子
+const damping = 0.95; // 衰减因子
 
 // 点击添加波峰
 canvas.addEventListener('click', (e) => {
@@ -32,7 +32,7 @@ canvas.addEventListener('click', (e) => {
             const nx = x + dx;
             const ny = y + dy;
             if(nx >=0 && nx < width && ny >=0 && ny < height){
-                previous[ny * width + nx] = 255;
+                previous[ny * width + nx] = 128;
             }
         }
     }
@@ -44,16 +44,49 @@ function render(){
     const data = imageData.data;
 
     // 更新高度图
-    for(let y=1; y<height-1; y++){
-        for(let x=1; x<width-1; x++){
+    for(let y=0; y<height; y++){
+        for(let x=0; x<width; x++){
             const idx = y * width + x;
-            const newHeight = ((previous[idx-1] + previous[idx+1] + previous[idx-width] + previous[idx+width]) / 2) - current[idx];
+            
+            // 边界检查：如果越界，就取当前点 idx
+            const left = x > 0 ? idx - 1 : idx;
+            const right = x < width - 1 ? idx + 1 : idx;
+            const up = y > 0 ? idx - width : idx;
+            const down = y < height - 1 ? idx + width : idx;
+
+            const newHeight = ((previous[left] + previous[right] + previous[up] + previous[down]) / 2) - current[idx];
             current[idx] = newHeight * damping;
-            const color = Math.max(0, Math.min(255, current[idx]));
-            data[idx*4] = 0;      // R
-            data[idx*4+1] = 150;  // G
-            data[idx*4+2] = 255;  // B
-            data[idx*4+3] = color; // Alpha
+        }
+    }
+
+    // 渲染法线
+    for(let y=0; y<height; y++){
+        for(let x=0; x<width; x++){
+            const idx = y * width + x;
+            
+            // 边界检查
+            const leftIdx = x > 0 ? idx - 1 : idx;
+            const rightIdx = x < width - 1 ? idx + 1 : idx;
+            const upIdx = y > 0 ? idx - width : idx;
+            const downIdx = y < height - 1 ? idx + width : idx;
+
+            // 计算梯度 (法线 x, y 分量)
+            const dx = current[leftIdx] - current[rightIdx];
+            const dy = current[upIdx] - current[downIdx];
+            const dz = 16.0; // Z 分量，控制法线的"陡峭"程度。值越小波纹越立体，值越大越平坦。
+
+            // 归一化法线向量
+            const len = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            const nx = dx / len;
+            const ny = dy / len;
+            const nz = dz / len;
+
+            // 将法线向量 [-1, 1] 映射到颜色 [0, 255]
+            // 标准法线贴图：R=X, G=Y, B=Z
+            data[idx*4] = (nx + 1) * 127.5;     // R
+            data[idx*4+1] = (ny + 1) * 127.5;   // G
+            data[idx*4+2] = (nz + 1) * 127.5;   // B (通常是浅蓝色)
+            data[idx*4+3] = 255;                // Alpha
         }
     }
 
