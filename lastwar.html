@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Last War - Controls Fixed</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #222; font-family: 'Arial Black', sans-serif; user-select: none; -webkit-user-select: none; }
+        #game-container { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+        
+        /* UI Layer */
+        #ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10;
+            display: flex; flex-direction: column; justify-content: space-between;
+        }
+        
+        #header { padding: 20px; text-align: center; color: white; text-shadow: 0 2px 4px rgba(0,0,0,0.8); }
+        #squad-count { 
+            font-size: 40px; color: #00AAFF; 
+            background: rgba(0,0,0,0.6); padding: 5px 25px; border-radius: 30px; border: 2px solid #00AAFF;
+            display: inline-block;
+        }
+        #level-progress {
+            width: 80%; height: 12px; background: #444; margin: 15px auto 0; border-radius: 6px; overflow: hidden; border: 1px solid #666;
+        }
+        #progress-bar { width: 0%; height: 100%; background: #00FF00; transition: width 0.1s linear; }
+        
+        /* Start / Game Over Screen */
+        #overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center;
+            flex-direction: column; color: white; pointer-events: auto; z-index: 20;
+        }
+        
+        h1 { font-size: 32px; margin-bottom: 10px; color: #FFAA00; text-transform: uppercase; }
+        p { color: #ccc; font-size: 14px; margin-bottom: 30px; }
+        
+        button {
+            padding: 15px 50px; font-size: 24px; font-weight: bold;
+            background: linear-gradient(to bottom, #00AAFF, #0066CC);
+            border: none; border-radius: 12px; color: white; cursor: pointer;
+            box-shadow: 0 6px 0 #004488; transition: all 0.1s;
+        }
+        button:active { transform: translateY(4px); box-shadow: 0 2px 0 #004488; }
+    </style>
+    <!-- 使用稳定的 Three.js r128 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.9.1/gsap.min.js"></script>
+</head>
+<body>
+
+<div id="game-container"></div>
+
+<div id="ui-layer">
+    <div id="header">
+        <div id="squad-count">1</div>
+        <div id="level-progress"><div id="progress-bar"></div></div>
+    </div>
+</div>
+
+<div id="overlay">
+    <h1 id="overlay-title">LAST WAR CLONE</h1>
+    <p>DRAG LEFT / RIGHT TO MOVE</p>
+    <button id="start-btn">TAP TO START</button>
+</div>
+
+<script>
+    // --- 配置 ---
+    const CONFIG = {
+        speed: 0.18,          // 游戏速度
+        sensitivity: -0.06,   // 操控灵敏度 (负数用于反转方向)
+        shootInterval: 20,    // 射击频率 (越小越快)
+        laneWidth: 12,        // 跑道宽度
+        colors: {
+            player: 0x0088FF,
+            enemy: 0xFF4444,
+            ground: 0x88CC88
+        }
+    };
+
+    // --- 变量 ---
+    let scene, camera, renderer;
+    let isRunning = false;
+    let squadGroup;
+    let bullets = [], enemies = [], gates = [];
+    let soldiers = [];
+    let frameCount = 0;
+    let worldZ = 0;
+    let boss = null;
+    let input = { x: 0, isDown: false, lastX: 0 };
+    let squadCount = 1;
+
+    // --- DOM ---
+    const startBtn = document.getElementById('start-btn');
+    const overlay = document.getElementById('overlay');
+    const title = document.getElementById('overlay-title');
+    const scoreEl = document.getElementById('squad-count');
+    const progressEl = document.getElementById('progress-bar');
+
+    startBtn.addEventListener('click', () => {
+        if (!scene) initGame();
+        else resetGame();
+        overlay.style.display = 'none';
+        isRunning = true;
+    });
+
+    function initGame() {
+        const container = document.getElementById('game-container');
+        
+        // Scene
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x87CEEB);
+        scene.fog = new THREE.Fog(0x87CEEB, 20, 60);
+
+        // Camera
+        const aspect = container.clientWidth / container.clientHeight;
+        camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
+        camera.position.set(0, 12, -10); // 从后方
+        camera.lookAt(0, 0, 5);          // 看向前方
+
+        // Renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.shadowMap.enabled = true;
+        container.appendChild(renderer.domElement);
+
+        // Lights
+        const ambient = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambient);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 0.6);
+        dirLight.position.set(-5, 10, 5); // 光源位置
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // Environment
+        createGround();
+
+        // Player Group
+        squadGroup = new THREE.Group();
+        scene.add(squadGroup);
+        
+        // Input Listeners
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+        document.addEventListener('touchstart', (e) => onDown(e.touches[0]));
+        document.addEventListener('touchmove', (e) => { e.preventDefault(); onMove(e.touches[0]); }, {passive: false});
+        document.addEventListener('touchend', onUp);
+        window.addEventListener('resize', onResize);
+
+        resetGame();
+        animate();
+    }
+
+    function createGround() {
+        const roadGeo = new THREE.PlaneGeometry(CONFIG.laneWidth, 200);
+        const roadMat = new THREE.MeshPhongMaterial({ color: 0x555555 });
+        const road = new THREE.Mesh(roadGeo, roadMat);
+        road.rotation.x = -Math.PI / 2;
+        road.position.z = 50;
+        road.scale.y = 10; 
+        road.receiveShadow = true;
+        scene.add(road);
+    }
+
+    function resetGame() {
+        worldZ = 0;
+        squadCount = 1;
+        scoreEl.innerText = "1";
+        progressEl.style.width = "0%";
+        
+        if (squadGroup) {
+            while(squadGroup.children.length > 0) squadGroup.remove(squadGroup.children[0]);
+        }
+        soldiers = [];
+        
+        bullets.forEach(b => scene.remove(b)); bullets = [];
+        enemies.forEach(e => scene.remove(e.mesh)); enemies = [];
+        gates.forEach(g => scene.remove(g.mesh)); gates = [];
+        if (boss) { scene.remove(boss.mesh); boss = null; }
+
+        updateSquad(1);
+        generateLevel();
+    }
+
+    function generateLevel() {
+        let z = 10;
+        // 增加关卡长度
+        for (let i = 0; i < 8; i++) {
+            z += 25;
+            // Gate
+            const isGood = Math.random() > 0.45;
+            const val = Math.floor(Math.random() * 4) + 2;
+            const op = isGood ? (Math.random()>0.5 ? 'x' : '+') : '-';
+            createGate(z, op, op === 'x' ? 2 : val * 2, isGood);
+            
+            // Enemy
+            z += 12;
+            createEnemyGroup(z, 2 + Math.floor(i * 0.5));
+        }
+        z += 30;
+        createBoss(z);
+    }
+
+    function createSoldierMesh(color) {
+        const group = new THREE.Group();
+        
+        // 身体 (圆柱)
+        const body = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.25, 0.25, 0.6, 8),
+            new THREE.MeshLambertMaterial({ color: color })
+        );
+        body.position.y = 0.3;
+        body.castShadow = true;
+        group.add(body);
+
+        // 头 (球体)
+        const head = new THREE.Mesh(
+            new THREE.SphereGeometry(0.25, 8, 8),
+            new THREE.MeshLambertMaterial({ color: color })
+        );
+        head.position.y = 0.7;
+        head.castShadow = true;
+        group.add(head);
+
+        // 眼睛
+        const eyes = new THREE.Mesh(
+            new THREE.BoxGeometry(0.2, 0.05, 0.1),
+            new THREE.MeshBasicMaterial({ color: 0xffffff })
+        );
+        eyes.position.set(0, 0.7, 0.2); // Z+ 是脸朝向
+        group.add(eyes);
+
+        return group;
+    }
+
+    function updateSquad(num) {
+        if (num > 80) num = 80; // 限制最大数量
+        const current = soldiers.length;
+        const diff = num - current;
+
+        if (diff > 0) {
+            for (let i = 0; i < diff; i++) {
+                const mesh = createSoldierMesh(CONFIG.colors.player);
+                squadGroup.add(mesh);
+                soldiers.push(mesh);
+                mesh.scale.set(0,0,0);
+                gsap.to(mesh.scale, {x:1, y:1, z:1, duration: 0.4});
+            }
+        } else if (diff < 0) {
+            for (let i = 0; i < Math.abs(diff); i++) {
+                const m = soldiers.pop();
+                if (m) squadGroup.remove(m);
+            }
+        }
+
+        squadCount = soldiers.length;
+        scoreEl.innerText = squadCount;
+        
+        if (squadCount === 0 && isRunning) {
+            gameOver(false);
+        }
+
+        // 排列阵型
+        soldiers.forEach((mesh, i) => {
+            if (i === 0) {
+                gsap.to(mesh.position, {x:0, z:0, duration: 0.3});
+            } else {
+                const angle = i * 2.4;
+                const r = 0.45 * Math.sqrt(i);
+                const tx = Math.cos(angle) * r;
+                const tz = Math.sin(angle) * r;
+                gsap.to(mesh.position, {x: tx, z: tz, duration: 0.3});
+            }
+        });
+    }
+
+    function createBullet(pos) {
+        const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.12, 0.5),
+            new THREE.MeshBasicMaterial({ color: 0xffff00 })
+        );
+        mesh.position.copy(pos);
+        scene.add(mesh);
+        bullets.push(mesh);
+    }
+
+    function createEnemyGroup(z, count) {
+        for(let i=0; i<count; i++) {
+            const mesh = createSoldierMesh(CONFIG.colors.enemy);
+            const x = (Math.random() - 0.5) * (CONFIG.laneWidth - 2);
+            mesh.position.set(x, 0, z + Math.random()*3);
+            mesh.rotation.y = Math.PI; // Face player
+            scene.add(mesh);
+            enemies.push({ mesh: mesh, hp: 3 });
+        }
+    }
+
+    function createBoss(z) {
+        const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(3, 3, 3),
+            new THREE.MeshPhongMaterial({ color: 0x880000 })
+        );
+        mesh.position.set(0, 1.5, z);
+        
+        // 简单的Boss脸部
+        const eye = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.5, 0.1),
+            new THREE.MeshBasicMaterial({color:0xffffff})
+        );
+        eye.position.set(-0.8, 0.5, 1.51);
+        mesh.add(eye);
+        const eye2 = eye.clone();
+        eye2.position.set(0.8, 0.5, 1.51);
+        mesh.add(eye2);
+
+        scene.add(mesh);
+        boss = { mesh: mesh, hp: 200 };
+        enemies.push(boss);
+    }
+
+    function createGate(z, op, val, isGood) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 128; canvas.height = 128;
+        const ctx = canvas.getContext('2d');
+        const color = isGood ? '#00AAFF' : '#FF0000';
+        
+        ctx.fillStyle = color; ctx.globalAlpha = 0.4; ctx.fillRect(0,0,128,128);
+        ctx.globalAlpha = 1.0; ctx.strokeStyle = color; ctx.lineWidth = 8; ctx.strokeRect(0,0,128,128);
+        ctx.fillStyle = 'white'; ctx.font = 'bold 50px Arial'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(op + val, 64, 64);
+
+        const mesh = new THREE.Mesh(
+            new THREE.PlaneGeometry(5, 4),
+            new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true, side: THREE.DoubleSide })
+        );
+        mesh.position.set(0, 2, z);
+        scene.add(mesh);
+        gates.push({ mesh: mesh, op: op, val: val, used: false });
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if (!isRunning) return;
+
+        frameCount++;
+        
+        // 移动
+        squadGroup.position.z += CONFIG.speed;
+        worldZ = squadGroup.position.z;
+
+        // 相机跟随 (带一点视差)
+        camera.position.z = worldZ - 10;
+        camera.position.x = squadGroup.position.x * 0.3;
+
+        // 进度条
+        progressEl.style.width = Math.min((worldZ / 250) * 100, 100) + "%";
+
+        // 射击
+        if (frameCount % CONFIG.shootInterval === 0 && squadCount > 0) {
+            const center = squadGroup.position.clone();
+            center.y = 0.8; center.z += 0.5;
+            createBullet(center);
+            if (squadCount > 5) {
+                const l = center.clone(); l.x -= 0.6; createBullet(l);
+                const r = center.clone(); r.x += 0.6; createBullet(r);
+            }
+            if (squadCount > 20) {
+                const l2 = center.clone(); l2.x -= 1.2; createBullet(l2);
+                const r2 = center.clone(); r2.x += 1.2; createBullet(r2);
+            }
+        }
+
+        // 子弹
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            b.position.z += 0.6;
+            if (b.position.z > worldZ + 40) { scene.remove(b); bullets.splice(i, 1); continue; }
+            
+            let hit = false;
+            for (let j = 0; j < enemies.length; j++) {
+                const e = enemies[j];
+                const dx = b.position.x - e.mesh.position.x;
+                const dz = b.position.z - e.mesh.position.z;
+                const size = (e === boss) ? 3 : 0.8;
+                if (Math.abs(dx) < size/2 && Math.abs(dz) < size/2) {
+                    e.hp--; hit = true;
+                    e.mesh.scale.multiplyScalar(1.1);
+                    gsap.to(e.mesh.scale, {x:1, y:1, z:1, duration: 0.1}); // Hit Anim
+                    
+                    if (e.hp <= 0) {
+                        scene.remove(e.mesh);
+                        enemies.splice(j, 1);
+                        if (e === boss) gameOver(true);
+                    }
+                    break;
+                }
+            }
+            if (hit) { scene.remove(b); bullets.splice(i, 1); }
+        }
+
+        // 敌人碰撞
+        enemies.forEach(e => {
+            if (e !== boss && e.mesh.position.z > worldZ + 1) {
+                e.mesh.position.z -= 0.05;
+                const dx = squadGroup.position.x - e.mesh.position.x;
+                e.mesh.position.x += dx * 0.03; // 稍微追踪
+            }
+            if (Math.abs(e.mesh.position.z - worldZ) < 1) {
+                if (Math.abs(squadGroup.position.x - e.mesh.position.x) < 1.5) {
+                    updateSquad(squadCount - 1);
+                    if (e !== boss) { scene.remove(e.mesh); e.hp = 0; }
+                }
+            }
+        });
+        enemies = enemies.filter(e => e.hp > 0);
+
+        // 门逻辑
+        gates.forEach(g => {
+            if (g.used) return;
+            if (Math.abs(g.mesh.position.z - worldZ) < 0.5) {
+                if (Math.abs(squadGroup.position.x - g.mesh.position.x) < 3.2) {
+                    g.used = true; scene.remove(g.mesh);
+                    let n = squadCount;
+                    if (g.op === '+') n += g.val;
+                    if (g.op === '-') n -= g.val;
+                    if (g.op === 'x') n *= g.val;
+                    updateSquad(Math.floor(n));
+                }
+            }
+        });
+
+        renderer.render(scene, camera);
+    }
+
+    // --- 控制修正 ---
+    function onDown(e) {
+        input.isDown = true;
+        input.lastX = e.clientX;
+    }
+    function onMove(e) {
+        if (!input.isDown) return;
+        const dx = e.clientX - input.lastX;
+        input.lastX = e.clientX;
+        
+        // 【关键修正】这里使用 += 以及 负的 sensitivity，或者直接 -=
+        // 之前是 += dx * 0.025 (导致反向)
+        // 现在逻辑：向右滑(dx>0) -> 应该向右移 -> 在反向视角下，右是-X
+        // 所以我们使用 CONFIG.sensitivity (设为 -0.06)
+        squadGroup.position.x += dx * CONFIG.sensitivity;
+
+        // 边界
+        const limit = CONFIG.laneWidth / 2 - 1.5;
+        if (squadGroup.position.x > limit) squadGroup.position.x = limit;
+        if (squadGroup.position.x < -limit) squadGroup.position.x = -limit;
+    }
+    function onUp() { input.isDown = false; }
+    
+    function onResize() {
+        if (!camera) return;
+        const c = document.getElementById('game-container');
+        camera.aspect = c.clientWidth / c.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(c.clientWidth, c.clientHeight);
+    }
+
+    function gameOver(win) {
+        isRunning = false;
+        overlay.style.display = 'flex';
+        title.innerText = win ? "VICTORY!" : "FAILED";
+        title.style.color = win ? "#00FF00" : "#FF0000";
+        startBtn.innerText = "PLAY AGAIN";
+    }
+
+</script>
+</body>
+</html>
