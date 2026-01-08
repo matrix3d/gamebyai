@@ -1,5 +1,7 @@
 # html5gameByAI
 
+<a href="https://matrix3d.github.io/gamebyai/ocr.html">ocr.html</a>
+
 <a href="https://matrix3d.github.io/gamebyai/lastwar.html">lastwar.html</a>
 
 <a href="https://matrix3d.github.io/gamebyai/xiangqi.html">xiangqi.html</a>
