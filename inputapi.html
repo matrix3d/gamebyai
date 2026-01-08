@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>原生手写识别 (Google引擎)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            touch-action: none; /* 禁止手机页面滚动 */
+        }
+
+        h1 { margin-bottom: 10px; font-size: 1.2rem; color: #333; }
+
+        .canvas-box {
+            position: relative;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            padding: 2px;
+        }
+
+        canvas {
+            display: block;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            background-image: 
+                linear-gradient(0deg, transparent 299px, #eee 299px, #eee 301px, transparent 301px),
+                linear-gradient(90deg, transparent 299px, #eee 299px, #eee 301px, transparent 301px);
+            background-size: 600px 600px;
+            cursor: crosshair;
+        }
+
+        .btn-group {
+            margin-top: 15px;
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            padding: 10px 25px;
+            border: none;
+            border-radius: 50px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+        button:active { transform: scale(0.95); }
+        
+        .btn-clear { background: #ff4757; color: white; }
+        .btn-rec { background: #2ed573; color: white; }
+
+        #result-area {
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            min-height: 50px;
+        }
+
+        .char-box {
+            width: 50px;
+            height: 50px;
+            background: white;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: #333;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .char-box:first-child {
+            border-color: #2ed573;
+            color: #2ed573;
+            font-weight: bold;
+            transform: scale(1.1);
+        }
+
+        #status {
+            margin-top: 10px;
+            font-size: 12px;
+            color: #999;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>请在下方手写</h1>
+
+    <div class="canvas-box">
+        <!-- 宽600高600，但用CSS缩小显示，提高精度 -->
+        <canvas id="writeCanvas" width="600" height="600" style="width:300px; height:300px;"></canvas>
+    </div>
+
+    <div class="btn-group">
+        <button class="btn-clear" onclick="resetCanvas()">重写</button>
+        <!-- 我们做了自动识别，但保留按钮 -->
+        <button class="btn-rec" onclick="recognize()">识别</button>
+    </div>
+
+    <div id="status">等待书写...</div>
+
+    <div id="result-area"></div>
+
+    <script>
+        // --- 1. 画布逻辑 (原生JS，无依赖) ---
+        const canvas = document.getElementById('writeCanvas');
+        const ctx = canvas.getContext('2d');
+        const resultArea = document.getElementById('result-area');
+        const statusDiv = document.getElementById('status');
+
+        // 笔迹数据：[ [x数组, y数组, t时间数组], [第二笔...], ... ]
+        let trace = []; 
+        let currentStroke = { x: [], y: [], t: [] };
+        let isDown = false;
+        let lastTime = 0;
+
+        // 初始化画笔
+        ctx.lineWidth = 15; // 粗一点
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.strokeStyle = "#333";
+
+        // 坐标转换（因为canvas用了CSS缩放，需要换算坐标）
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+            
+            // 比例系数 (canvas实际像素 / css显示像素)
+            const scaleX = canvas.width / rect.width;
+            const scaleY = canvas.height / rect.height;
+
+            return {
+                x: (clientX - rect.left) * scaleX,
+                y: (clientY - rect.top) * scaleY
+            };
+        }
+
+        function start(e) {
+            e.preventDefault();
+            isDown = true;
+            const pos = getPos(e);
+            ctx.beginPath();
+            ctx.moveTo(pos.x, pos.y);
+            
+            // 记录第一点
+            currentStroke = { x: [], y: [], t: [] };
+            lastTime = Date.now();
+            recordPoint(pos.x, pos.y);
+        }
+
+        function move(e) {
+            if (!isDown) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            
+            recordPoint(pos.x, pos.y);
+        }
+
+        function end(e) {
+            if (!isDown) return;
+            isDown = false;
+            // 这一笔结束，存入总笔迹
+            if (currentStroke.x.length > 0) {
+                trace.push([currentStroke.x, currentStroke.y, currentStroke.t]);
+            }
+            // 自动触发识别（防抖，写完一笔后0.8秒自动识别）
+            clearTimeout(window.autoRecTimer);
+            window.autoRecTimer = setTimeout(recognize, 600);
+        }
+
+        function recordPoint(x, y) {
+            // 记录相对时间 (ms)
+            const now = Date.now();
+            const t = now - lastTime; 
+            currentStroke.x.push(Math.round(x));
+            currentStroke.y.push(Math.round(y));
+            currentStroke.t.push(t);
+        }
+
+        // 绑定鼠标和触摸事件
+        canvas.addEventListener('mousedown', start);
+        canvas.addEventListener('mousemove', move);
+        canvas.addEventListener('mouseup', end);
+        canvas.addEventListener('mouseleave', end);
+        
+        canvas.addEventListener('touchstart', start, {passive: false});
+        canvas.addEventListener('touchmove', move, {passive: false});
+        canvas.addEventListener('touchend', end);
+
+
+        // --- 2. 识别逻辑 (调用 Google API) ---
+        function recognize() {
+            if (trace.length === 0) return;
+            
+            statusDiv.innerText = "正在识别...";
+
+            // Google Input Tools API (Handwriting)
+            // 这是一个公开的测试接口，非常精准
+            const url = 'https://inputtools.google.com/request?itc=zh-t-i0-handwrit&app=demo';
+            
+            const data = {
+                "api_level": "537.36",
+                "app_version": "0.4",
+                "input_type": "0",
+                "options": "enable_pre_space",
+                "requests": [{
+                    "language": "zh",
+                    "writing_guide": {
+                        "writing_area_width": canvas.width,
+                        "writing_area_height": canvas.height
+                    },
+                    "pre_context": "",
+                    "ink": trace // 直接把笔迹数组发过去
+                }]
+            };
+
+            fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(json => {
+                if (json[0] === 'SUCCESS') {
+                    // 解析结果：json[1][0][1] 是候选字数组
+                    const candidates = json[1][0][1];
+                    showResult(candidates);
+                    statusDiv.innerText = "识别成功";
+                } else {
+                    statusDiv.innerText = "识别失败";
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                statusDiv.innerText = "网络错误，请检查连接";
+            });
+        }
+
+        function showResult(list) {
+            resultArea.innerHTML = '';
+            // 取前5个结果
+            list.slice(0, 5).forEach(char => {
+                const box = document.createElement('div');
+                box.className = 'char-box';
+                box.innerText = char;
+                box.onclick = () => alert(`你选了: ${char}`);
+                resultArea.appendChild(box);
+            });
+        }
+
+        function resetCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            trace = [];
+            resultArea.innerHTML = '';
+            statusDiv.innerText = "已清空";
+        }
+    </script>
+</body>
+</html>
