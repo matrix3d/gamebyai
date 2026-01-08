@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>手写汉字识别 (Canvas + OCR)</title>
+    <!-- 引入 Tesseract.js -->
+    <script src="https://unpkg.com/tesseract.js@v2.1.0/dist/tesseract.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #f0f2f5;
+            padding: 20px;
+            touch-action: none; /* 防止手机端画画时滚动页面 */
+        }
+        h1 {
+            color: #333;
+            font-size: 1.5rem;
+        }
+        .container {
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        canvas {
+            border: 2px solid #333;
+            border-radius: 8px;
+            cursor: crosshair;
+            background-color: #fff;
+            touch-action: none;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        button.clear {
+            background-color: #e74c3c;
+            color: white;
+        }
+        button.recognize {
+            background-color: #2ecc71;
+            color: white;
+        }
+        button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        #result {
+            margin-top: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            min-height: 40px;
+        }
+        #status {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>手写字识别</h1>
+        <!-- 画布区域 -->
+        <canvas id="drawCanvas" width="300" height="300"></canvas>
+        
+        <div class="controls">
+            <button class="clear" onclick="clearCanvas()">清空重写</button>
+            <button class="recognize" id="btnRec" onclick="recognizeText()">开始识别</button>
+        </div>
+
+        <div id="status">请在上方区域书写汉字</div>
+        <div id="result">等待识别...</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('drawCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const resultDiv = document.getElementById('result');
+        const btnRec = document.getElementById('btnRec');
+
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        // 初始化画布
+        function initCanvas() {
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.strokeStyle = "black";
+            ctx.lineWidth = 12; // 笔触粗细，太细不容易识别
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+        }
+        initCanvas();
+
+        // --- 绘图逻辑 (支持鼠标和触摸) ---
+        function getPos(e) {
+            const rect = canvas.getBoundingClientRect();
+            let x, y;
+            if (e.touches) {
+                x = e.touches[0].clientX - rect.left;
+                y = e.touches[0].clientY - rect.top;
+            } else {
+                x = e.clientX - rect.left;
+                y = e.clientY - rect.top;
+            }
+            return { x, y };
+        }
+
+        function startDraw(e) {
+            e.preventDefault();
+            isDrawing = true;
+            const pos = getPos(e);
+            lastX = pos.x;
+            lastY = pos.y;
+        }
+
+        function draw(e) {
+            if (!isDrawing) return;
+            e.preventDefault();
+            const pos = getPos(e);
+            
+            ctx.beginPath();
+            ctx.moveTo(lastX, lastY);
+            ctx.lineTo(pos.x, pos.y);
+            ctx.stroke();
+            
+            lastX = pos.x;
+            lastY = pos.y;
+        }
+
+        function stopDraw(e) {
+            if(isDrawing) {
+                e.preventDefault();
+                isDrawing = false;
+            }
+        }
+
+        // 绑定事件
+        canvas.addEventListener('mousedown', startDraw);
+        canvas.addEventListener('mousemove', draw);
+        canvas.addEventListener('mouseup', stopDraw);
+        canvas.addEventListener('mouseout', stopDraw);
+
+        canvas.addEventListener('touchstart', startDraw, {passive: false});
+        canvas.addEventListener('touchmove', draw, {passive: false});
+        canvas.addEventListener('touchend', stopDraw);
+
+        // --- 功能逻辑 ---
+
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            initCanvas(); // 重置背景色为白
+            resultDiv.innerText = "";
+            statusDiv.innerText = "已清空";
+        }
+
+        async function recognizeText() {
+            // 锁定按钮防止重复点击
+            btnRec.disabled = true;
+            resultDiv.innerText = "正在分析...";
+            statusDiv.innerText = "首次加载语言包可能需要几十秒，请稍候...";
+
+            try {
+                // 1. 获取图片数据
+                const imgData = canvas.toDataURL('image/png');
+
+                // 2. 调用 Tesseract 进行识别
+                // chi_sim 是简体中文，eng 是英文（辅助识别）
+                const { data: { text } } = await Tesseract.recognize(
+                    imgData,
+                    'chi_sim', 
+                    { 
+                        logger: m => {
+                            // 显示加载进度
+                            if(m.status === 'recognizing text') {
+                                statusDiv.innerText = `识别中... ${(m.progress * 100).toFixed(0)}%`;
+                            } else {
+                                statusDiv.innerText = m.status;
+                            }
+                        }
+                    }
+                );
+
+                // 3. 显示结果
+                // 去掉多余的空格
+                const cleanText = text.replace(/\s/g, '');
+                
+                if (cleanText.length === 0) {
+                    resultDiv.innerText = "未识别出文字，请写工整些";
+                } else {
+                    resultDiv.innerText = "识别结果: " + cleanText;
+                }
+                statusDiv.innerText = "识别完成";
+
+            } catch (error) {
+                console.error(error);
+                resultDiv.innerText = "识别出错";
+                statusDiv.innerText = "请检查网络或重试";
+            } finally {
+                btnRec.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
