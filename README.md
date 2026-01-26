@@ -1,6 +1,6 @@
 # html5gameByAI
 
-<a href="https://matrix3d.github.io/gamebyai/inputapi.html">cocosNavMesh_applovin.html</a>
+<a href="https://matrix3d.github.io/gamebyai/cocosNavMesh_applovin.html">cocosNavMesh_applovin.html</a>
 
 <a href="https://matrix3d.github.io/gamebyai/inputapi.html">inputapi.html</a>
 
