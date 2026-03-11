@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<title>2D Physics Engine</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #1a1a2e; overflow: hidden; font-family: Arial, sans-serif; }
+canvas { display: block; }
+#ui { position: fixed; top: 16px; left: 16px; z-index: 10; display: flex; gap: 8px; }
+button {
+  padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 14px; font-weight: bold; color: #fff; transition: transform 0.1s;
+}
+button:active { transform: scale(0.95); }
+#addTri { background: #e94560; }
+#addRect { background: #0f3460; }
+#addPent { background: #16213e; }
+#addHex { background: #533483; }
+#clear { background: #444; }
+#info { position: fixed; bottom: 16px; left: 16px; color: #fff8; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="ui">
+  <button id="addTri">三角形</button>
+  <button id="addRect">矩形</button>
+  <button id="addPent">五边形</button>
+  <button id="addHex">六边形</button>
+  <button id="clear">清空</button>
+</div>
+<div id="info">拖拽多边形移动 | 点击按钮添加形状</div>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width = innerWidth;
+  H = canvas.height = innerHeight;
+}
+resize();
+addEventListener('resize', resize);
+
+// --- Vector math ---
+const V = {
+  add: (a, b) => ({ x: a.x + b.x, y: a.y + b.y }),
+  sub: (a, b) => ({ x: a.x - b.x, y: a.y - b.y }),
+  mul: (a, s) => ({ x: a.x * s, y: a.y * s }),
+  dot: (a, b) => a.x * b.x + a.y * b.y,
+  cross: (a, b) => a.x * b.y - a.y * b.x,
+  crossVS: (v, s) => ({ x: s * v.y, y: -s * v.x }),
+  crossSV: (s, v) => ({ x: -s * v.y, y: s * v.x }),
+  len: (a) => Math.sqrt(a.x * a.x + a.y * a.y),
+  norm: (a) => { const l = V.len(a) || 1; return { x: a.x / l, y: a.y / l }; },
+  rot: (v, a) => ({ x: v.x * Math.cos(a) - v.y * Math.sin(a), y: v.x * Math.sin(a) + v.y * Math.cos(a) }),
+  neg: (a) => ({ x: -a.x, y: -a.y }),
+};
+
+// --- Body ---
+class Body {
+  constructor(x, y, vertices, color) {
+    this.pos = { x, y };
+    this.vel = { x: 0, y: 0 };
+    this.angle = 0;
+    this.angVel = 0;
+    this.localVerts = vertices; // local space
+    this.color = color;
+    this.restitution = 0.25;
+    this.friction = 0.6;
+    this.sleeping = false;
+    this.isStatic = false;
+
+    // compute mass & inertia from polygon
+    let area = 0, inertia = 0;
+    const n = vertices.length;
+    for (let i = 0; i < n; i++) {
+      const v0 = vertices[i], v1 = vertices[(i + 1) % n];
+      const cr = V.cross(v0, v1);
+      area += cr;
+      inertia += cr * (V.dot(v0, v0) + V.dot(v0, v1) + V.dot(v1, v1));
+    }
+    area = Math.abs(area) / 2;
+    this.mass = area * 0.01;
+    this.invMass = 1 / this.mass;
+    this.inertia = Math.abs(inertia) * 0.01 / 6;
+    this.invInertia = 1 / this.inertia;
+  }
+
+  getWorldVerts() {
+    return this.localVerts.map(v => V.add(this.pos, V.rot(v, this.angle)));
+  }
+
+  getAxes() {
+    const verts = this.getWorldVerts();
+    const axes = [];
+    for (let i = 0; i < verts.length; i++) {
+      const edge = V.sub(verts[(i + 1) % verts.length], verts[i]);
+      axes.push(V.norm({ x: -edge.y, y: edge.x }));
+    }
+    return axes;
+  }
+
+  project(axis) {
+    const verts = this.getWorldVerts();
+    let min = Infinity, max = -Infinity;
+    for (const v of verts) {
+      const p = V.dot(v, axis);
+      if (p < min) min = p;
+      if (p > max) max = p;
+    }
+    return { min, max };
+  }
+
+  containsPoint(px, py) {
+    const verts = this.getWorldVerts();
+    const n = verts.length;
+    for (let i = 0; i < n; i++) {
+      const a = verts[i], b = verts[(i + 1) % n];
+      if ((b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x) > 0) return false;
+    }
+    return true;
+  }
+}
+
+// --- Physics world ---
+const GRAVITY = { x: 0, y: 980 };
+const bodies = [];
+let GROUND_Y = H - 60;
+const WALL_LEFT = 0;
+let WALL_RIGHT = W;
+
+// --- SAT collision ---
+function sat(a, b) {
+  let minOverlap = Infinity;
+  let smallestAxis = null;
+  const axes = [...a.getAxes(), ...b.getAxes()];
+
+  for (const axis of axes) {
+    const pA = a.project(axis);
+    const pB = b.project(axis);
+    const overlap = Math.min(pA.max - pB.min, pB.max - pA.min);
+    if (overlap <= 0) return null;
+    if (overlap < minOverlap) {
+      minOverlap = overlap;
+      smallestAxis = axis;
+    }
+  }
+
+  // ensure normal points from a to b
+  const d = V.sub(b.pos, a.pos);
+  if (V.dot(d, smallestAxis) < 0) smallestAxis = V.neg(smallestAxis);
+
+  // find contact point (deepest vertex)
+  let contactPoint = null;
+  let deepest = -Infinity;
+  for (const v of a.getWorldVerts()) {
+    const depth = -V.dot(V.sub(v, b.pos), smallestAxis);
+    if (depth > deepest) { deepest = depth; contactPoint = v; }
+  }
+  for (const v of b.getWorldVerts()) {
+    const depth = V.dot(V.sub(v, a.pos), smallestAxis);
+    if (depth > deepest) { deepest = depth; contactPoint = v; }
+  }
+
+  return { normal: smallestAxis, depth: minOverlap, contact: contactPoint };
+}
+
+function resolveCollision(a, b, info) {
+  const { normal, depth, contact } = info;
+
+  // positional correction
+  const totalInvMass = a.invMass + b.invMass;
+  if (totalInvMass === 0) return;
+  const correction = V.mul(normal, depth / totalInvMass * 0.8);
+  a.pos = V.sub(a.pos, V.mul(correction, a.invMass));
+  b.pos = V.add(b.pos, V.mul(correction, b.invMass));
+
+  // relative velocity at contact
+  const rA = V.sub(contact, a.pos);
+  const rB = V.sub(contact, b.pos);
+  const velA = V.add(a.vel, V.crossSV(a.angVel, rA));
+  const velB = V.add(b.vel, V.crossSV(b.angVel, rB));
+  const relVel = V.sub(velB, velA);
+  const velAlongNormal = V.dot(relVel, normal);
+
+  if (velAlongNormal > 0) return; // separating
+
+  const e = Math.min(a.restitution, b.restitution);
+  const rAcrossN = V.cross(rA, normal);
+  const rBcrossN = V.cross(rB, normal);
+  let denom = totalInvMass + rAcrossN * rAcrossN * a.invInertia + rBcrossN * rBcrossN * b.invInertia;
+
+  const j = -(1 + e) * velAlongNormal / denom;
+  const impulse = V.mul(normal, j);
+
+  a.vel = V.sub(a.vel, V.mul(impulse, a.invMass));
+  b.vel = V.add(b.vel, V.mul(impulse, b.invMass));
+  a.angVel -= a.invInertia * V.cross(rA, impulse);
+  b.angVel += b.invInertia * V.cross(rB, impulse);
+
+  // friction
+  const tangent = V.norm(V.sub(relVel, V.mul(normal, velAlongNormal)));
+  const jt = -V.dot(relVel, tangent) / denom;
+  const mu = (a.friction + b.friction) / 2;
+  const frictionImpulse = Math.abs(jt) < j * mu
+    ? V.mul(tangent, jt)
+    : V.mul(tangent, -j * mu);
+
+  a.vel = V.sub(a.vel, V.mul(frictionImpulse, a.invMass));
+  b.vel = V.add(b.vel, V.mul(frictionImpulse, b.invMass));
+  a.angVel -= a.invInertia * V.cross(rA, frictionImpulse);
+  b.angVel += b.invInertia * V.cross(rB, frictionImpulse);
+}
+
+// --- Ground & walls as static bodies ---
+function groundCollision(body) {
+  const verts = body.getWorldVerts();
+  for (const v of verts) {
+    // ground
+    if (v.y > GROUND_Y) {
+      const depth = v.y - GROUND_Y;
+      const normal = { x: 0, y: -1 };
+      const contact = { x: v.x, y: GROUND_Y };
+      const r = V.sub(contact, body.pos);
+      body.pos.y -= depth;
+
+      const velAtContact = V.add(body.vel, V.crossSV(body.angVel, r));
+      const vn = V.dot(velAtContact, normal);
+      if (vn < 0) {
+        const rCrossN = V.cross(r, normal);
+        const denom = body.invMass + rCrossN * rCrossN * body.invInertia;
+        const e = Math.abs(vn) < 50 ? 0 : body.restitution; // kill bounce at low speed
+        const j = -(1 + e) * vn / denom;
+        body.vel = V.add(body.vel, V.mul(normal, j * body.invMass));
+        body.angVel += body.invInertia * V.cross(r, V.mul(normal, j));
+
+        // friction
+        const tangent = V.norm(V.sub(velAtContact, V.mul(normal, vn)));
+        const jt = -V.dot(velAtContact, tangent) / denom;
+        const mu = 0.7; // strong ground friction
+        const ft = Math.abs(jt) < j * mu ? jt : -j * mu * Math.sign(jt);
+        body.vel = V.add(body.vel, V.mul(tangent, ft * body.invMass));
+        body.angVel += body.invInertia * V.cross(r, V.mul(tangent, ft));
+      }
+      // extra ground contact damping
+      body.vel.x *= 0.98;
+      body.angVel *= 0.97;
+    }
+    // left wall
+    if (v.x < WALL_LEFT) {
+      body.pos.x += WALL_LEFT - v.x;
+      if (body.vel.x < 0) body.vel.x *= -body.restitution;
+    }
+    // right wall
+    if (v.x > WALL_RIGHT) {
+      body.pos.x -= v.x - WALL_RIGHT;
+      if (body.vel.x > 0) body.vel.x *= -body.restitution;
+    }
+  }
+}
+
+// --- Create polygon ---
+function makeRegularPoly(n, radius) {
+  const verts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * 2 * i) / n - Math.PI / 2;
+    verts.push({ x: Math.cos(a) * radius, y: Math.sin(a) * radius });
+  }
+  // ensure clockwise
+  let area = 0;
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    area += verts[i].x * verts[j].y - verts[j].x * verts[i].y;
+  }
+  if (area > 0) verts.reverse();
+  return verts;
+}
+
+function makeRect(w, h) {
+  return [
+    { x: -w/2, y: -h/2 }, { x: w/2, y: -h/2 },
+    { x: w/2, y: h/2 }, { x: -w/2, y: h/2 }
+  ];
+}
+
+const colors = ['#e94560','#0f3460','#533483','#16213e','#e7b2a5','#5c7aea','#f38181','#aa96da','#fcbad3','#a8d8ea'];
+
+function addBody(type) {
+  const x = 100 + Math.random() * (W - 200);
+  const y = 80 + Math.random() * 100;
+  const color = colors[Math.floor(Math.random() * colors.length)];
+  let verts;
+  const sz = 30 + Math.random() * 30;
+  switch (type) {
+    case 3: verts = makeRegularPoly(3, sz); break;
+    case 4: verts = makeRect(sz * 1.2 + Math.random() * 20, sz + Math.random() * 20); break;
+    case 5: verts = makeRegularPoly(5, sz); break;
+    case 6: verts = makeRegularPoly(6, sz); break;
+  }
+  const b = new Body(x, y, verts, color);
+  b.angle = Math.random() * Math.PI * 2;
+  bodies.push(b);
+}
+
+// --- Drag ---
+let dragBody = null, dragOffset = { x: 0, y: 0 };
+let mousePos = { x: 0, y: 0 };
+let isDragging = false;
+
+canvas.addEventListener('pointerdown', e => {
+  const mx = e.clientX, my = e.clientY;
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    if (bodies[i].containsPoint(mx, my)) {
+      dragBody = bodies[i];
+      dragOffset = V.sub(dragBody.pos, { x: mx, y: my });
+      mousePos = { x: mx, y: my };
+      isDragging = true;
+      dragBody.vel = { x: 0, y: 0 };
+      dragBody.angVel = 0;
+      break;
+    }
+  }
+});
+
+canvas.addEventListener('pointermove', e => {
+  mousePos = { x: e.clientX, y: e.clientY };
+});
+
+canvas.addEventListener('pointerup', () => {
+  if (dragBody) {
+    // give velocity based on mouse movement
+    isDragging = false;
+    dragBody = null;
+  }
+});
+
+// --- Update ---
+const SUB_STEPS = 4;
+const dt = 1 / 60;
+
+function update() {
+  const subDt = dt / SUB_STEPS;
+
+  for (let step = 0; step < SUB_STEPS; step++) {
+    // drag spring force
+    if (isDragging && dragBody) {
+      const target = V.add(mousePos, dragOffset);
+      const diff = V.sub(target, dragBody.pos);
+      const springForce = V.mul(diff, 300);
+      const dampForce = V.mul(dragBody.vel, -15);
+      const force = V.add(springForce, dampForce);
+      dragBody.vel = V.add(dragBody.vel, V.mul(force, subDt));
+      dragBody.angVel *= 0.9;
+    }
+
+    for (const b of bodies) {
+      if (b === dragBody && isDragging) {
+        // still apply some gravity
+        b.vel = V.add(b.vel, V.mul(GRAVITY, subDt * 0.3));
+      } else {
+        b.vel = V.add(b.vel, V.mul(GRAVITY, subDt));
+      }
+      // damping
+      b.vel = V.mul(b.vel, 0.995);
+      b.angVel *= 0.993;
+
+      // sleep check: if velocity is very small, zero it out
+      const speed = V.len(b.vel);
+      const angSpeed = Math.abs(b.angVel);
+      if (speed < 3 && angSpeed < 0.05) {
+        b.vel = { x: 0, y: 0 };
+        b.angVel = 0;
+        b.sleeping = true;
+      } else {
+        b.sleeping = false;
+      }
+
+      b.pos = V.add(b.pos, V.mul(b.vel, subDt));
+      b.angle += b.angVel * subDt;
+    }
+
+    // body-body collisions
+    for (let i = 0; i < bodies.length; i++) {
+      for (let j = i + 1; j < bodies.length; j++) {
+        // broad phase: distance check
+        const d = V.sub(bodies[j].pos, bodies[i].pos);
+        if (V.len(d) > 150) continue;
+        const info = sat(bodies[i], bodies[j]);
+        if (info) resolveCollision(bodies[i], bodies[j], info);
+      }
+    }
+
+    // ground/wall collisions
+    for (const b of bodies) {
+      groundCollision(b);
+    }
+  }
+
+  // remove bodies that fall off screen (safety)
+  for (let i = bodies.length - 1; i >= 0; i--) {
+    if (bodies[i].pos.y > H + 200) bodies.splice(i, 1);
+  }
+}
+
+// --- Render ---
+function drawGround() {
+  // ground
+  ctx.fillStyle = '#2a2a4a';
+  ctx.fillRect(0, GROUND_Y, W, H - GROUND_Y);
+  ctx.fillStyle = '#3a3a6a';
+  ctx.fillRect(0, GROUND_Y, W, 3);
+
+  // grid lines on ground
+  ctx.strokeStyle = '#3a3a5a';
+  ctx.lineWidth = 1;
+  for (let x = 0; x < W; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, GROUND_Y);
+    ctx.lineTo(x, H);
+    ctx.stroke();
+  }
+}
+
+function drawBody(b) {
+  const verts = b.getWorldVerts();
+  ctx.beginPath();
+  ctx.moveTo(verts[0].x, verts[0].y);
+  for (let i = 1; i < verts.length; i++) ctx.lineTo(verts[i].x, verts[i].y);
+  ctx.closePath();
+
+  // fill with slight gradient effect
+  ctx.fillStyle = b.color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // draw a line from center to indicate rotation
+  ctx.beginPath();
+  ctx.moveTo(b.pos.x, b.pos.y);
+  const dir = V.rot({ x: 15, y: 0 }, b.angle);
+  ctx.lineTo(b.pos.x + dir.x, b.pos.y + dir.y);
+  ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+}
+
+function render() {
+  ctx.clearRect(0, 0, W, H);
+  drawGround();
+
+  // draw drag spring line
+  if (isDragging && dragBody) {
+    const target = V.add(mousePos, dragOffset);
+    ctx.beginPath();
+    ctx.moveTo(dragBody.pos.x, dragBody.pos.y);
+    ctx.lineTo(target.x, target.y);
+    ctx.strokeStyle = 'rgba(255,255,100,0.6)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  for (const b of bodies) drawBody(b);
+
+  // body count
+  ctx.fillStyle = '#fff8';
+  ctx.font = '13px monospace';
+  ctx.fillText(`bodies: ${bodies.length}`, W - 120, 30);
+}
+
+function loop() {
+  update();
+  render();
+  requestAnimationFrame(loop);
+}
+
+// --- Events ---
+document.getElementById('addTri').onclick = () => addBody(3);
+document.getElementById('addRect').onclick = () => addBody(4);
+document.getElementById('addPent').onclick = () => addBody(5);
+document.getElementById('addHex').onclick = () => addBody(6);
+document.getElementById('clear').onclick = () => { bodies.length = 0; };
+
+addEventListener('resize', () => { GROUND_Y = H - 60; WALL_RIGHT = W; });
+
+// Start with a few bodies
+for (let i = 0; i < 5; i++) {
+  addBody(3 + Math.floor(Math.random() * 4));
+}
+
+loop();
+</script>
+</body>
+</html>
