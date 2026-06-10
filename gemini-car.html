@@ -1,0 +1,1049 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Moja Grand Prix - BugFix Arcade Edition</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #ccddee;
+            font-family: 'Arial', sans-serif;
+            user-select: none;
+        }
+
+        #canvas-container {
+            width: 100%;
+            height: 100%;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1;
+        }
+
+        .overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(5px);
+            transition: all 0.4s ease;
+        }
+
+        .hidden {
+            opacity: 0 !important;
+            pointer-events: none !important;
+        }
+
+        .panel {
+            background: rgba(255, 255, 255, 0.95);
+            border: 4px solid #333;
+            box-shadow: 8px 8px 0px #111;
+            border-radius: 4px;
+            padding: 40px;
+            text-align: center;
+            color: #222;
+            max-width: 500px;
+            width: 80%;
+        }
+
+        h1 {
+            font-size: 2.8rem;
+            margin: 0 0 15px 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            color: #ff2255;
+            text-shadow: 3px 3px 0px #ffddee;
+            -webkit-text-stroke: 1px #000;
+        }
+
+        p {
+            color: #444;
+            font-size: 1.1rem;
+            font-weight: bold;
+        }
+
+        .controls-guide {
+            margin: 20px 0;
+            background: #f0f0f0;
+            padding: 15px;
+            border: 2px dashed #888;
+            border-radius: 4px;
+            text-align: left;
+            font-size: 0.95rem;
+            line-height: 1.6;
+        }
+
+        .btn {
+            background: #00ccff;
+            border: 3px solid #000;
+            color: black;
+            padding: 12px 35px;
+            font-size: 1.3rem;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 4px 4px 0px #000;
+            transition: transform 0.1s, box-shadow 0.1s;
+            text-transform: uppercase;
+        }
+
+        .btn:hover {
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px #000;
+            background: #ffcc00;
+        }
+        .btn:active {
+            transform: translate(2px, 2px);
+            box-shadow: 2px 2px 0px #000;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: flex-start;
+            gap: 20px;
+            pointer-events: none;
+            z-index: 5;
+            font-family: 'Impact', 'Arial Black', sans-serif;
+        }
+
+        .hud-card {
+            background: #ffffff;
+            border: 3px solid #000;
+            box-shadow: 4px 4px 0px #000;
+            padding: 10px 20px;
+            border-radius: 4px;
+            color: #000;
+            font-size: 1.5rem;
+        }
+
+        .hud-highlight {
+            color: #ff2255;
+        }
+
+        #minimap-container {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 160px;
+            height: 160px;
+            background: rgba(0, 0, 0, 0.75);
+            border: 3px solid #000;
+            box-shadow: 4px 4px 0px rgba(0,0,0,0.3);
+            border-radius: 8px;
+            z-index: 5;
+            pointer-events: none;
+        }
+        #minimap {
+            width: 100%;
+            height: 100%;
+        }
+
+        #live-ranking {
+            position: absolute;
+            top: 95px;
+            left: 20px;
+            background: #ffffff;
+            border: 3px solid #000;
+            box-shadow: 4px 4px 0px #000;
+            padding: 12px 15px;
+            border-radius: 4px;
+            color: #333;
+            z-index: 5;
+            pointer-events: none;
+            font-weight: bold;
+        }
+
+        .rank-item {
+            margin: 6px 0;
+            font-size: 1.05rem;
+        }
+        .rank-player {
+            color: #ff2255;
+            background: #ffeaef;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+
+        #countdown {
+            position: absolute;
+            font-size: 9rem;
+            font-family: 'Impact', sans-serif;
+            color: #ffcc00;
+            -webkit-text-stroke: 3px #000;
+            text-shadow: 6px 6px 0px #000;
+            z-index: 6;
+            pointer-events: none;
+            transition: all 0.2s ease;
+        }
+
+        .leaderboard-table {
+            width: 100%;
+            margin: 20px 0;
+            border-collapse: collapse;
+            font-weight: bold;
+        }
+
+        .leaderboard-table th, .leaderboard-table td {
+            padding: 10px;
+            text-align: center;
+            border: 2px solid #000;
+        }
+
+        .leaderboard-table th {
+            background: #ffcc00;
+        }
+
+        .row-player {
+            background: #ffeaef;
+        }
+        /* 触屏控制样式 */
+        #touch-controls {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            right: 12px;
+            z-index: 20;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            pointer-events: auto;
+            touch-action: none;
+        }
+
+        .left-pad, .right-pad { display: flex; gap: 12px; align-items: center; }
+
+        .thumb-btn {
+            width: 84px;
+            height: 84px;
+            border-radius: 14px;
+            background: rgba(0,0,0,0.36);
+            border: 3px solid #000;
+            color: #fff;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 4px 4px 0px #000;
+            -webkit-user-select: none;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .small-btn {
+            width: 68px;
+            height: 68px;
+            border-radius: 50%;
+            background: rgba(255,204,0,0.95);
+            color: #000;
+            border: 3px solid #000;
+            font-weight: bold;
+            font-size: 0.95rem;
+            box-shadow: 4px 4px 0px #000;
+            touch-action: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div id="hud" class="hidden">
+        <div class="hud-card">排名: <span class="hud-highlight" id="lbl-pos">1/4</span></div>
+        <div class="hud-card">圈数: <span class="hud-highlight" id="lbl-lap">1/3</span></div>
+        <div class="hud-card"><span class="hud-highlight" id="lbl-speed">0</span> KM/H</div>
+    </div>
+
+    <!-- 触屏控制区（移动端可见） -->
+    <div id="touch-controls" aria-hidden="false">
+        <div class="left-pad">
+            <button class="thumb-btn" data-action="left" aria-label="左">◀</button>
+            <button class="thumb-btn" data-action="right" aria-label="右">▶</button>
+        </div>
+        <div class="right-pad">
+            <button class="thumb-btn" data-action="up" aria-label="加速">▲</button>
+            <button class="thumb-btn" data-action="down" aria-label="刹车">▼</button>
+            <button class="small-btn" data-action="space" aria-label="漂移">漂移</button>
+        </div>
+    </div>
+
+    <div id="minimap-container" class="hidden">
+        <canvas id="minimap" width="160" height="160"></canvas>
+    </div>
+
+    <div id="live-ranking" class="hidden"></div>
+
+    <div id="countdown" class="hidden">3</div>
+
+    <div id="start-screen" class="overlay">
+        <div class="panel">
+            <h1>Moja Grand Prix</h1>
+            <p>高清明亮街机风・智能动态缠斗 AI 赛车</p>
+            <div class="controls-guide">
+                <strong>操纵档位说明：</strong><br>
+                • <b>W 键 / ⬆ 方向键</b> ：猛踩油门加速<br>
+                • <b>S 键 / ⬇ 方向键</b> ：踩刹车减速 / 倒车<br>
+                • <b>A, D 键 / ⬅, ➡ 键</b> ：左右精准打方向<br>
+                • <b>SPACE 空格键</b> ：过弯时按住，触发华丽侧滑漂移
+            </div>
+            <button class="btn" id="btn-start">开始竞速</button>
+        </div>
+    </div>
+
+    <div id="end-screen" class="overlay hidden">
+        <div class="panel" style="max-width: 550px;">
+            <h1 style="color: #00ccff; text-shadow: 3px 3px 0px #000;">格子旗挥舞</h1>
+            <p>RACE RESULTS / 赛事终点结算排行榜</p>
+            
+            <table class="leaderboard-table" id="final-table">
+                <thead>
+                    <tr>
+                        <th>名次</th>
+                        <th>赛车手</th>
+                        <th>总历时</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <button class="btn" id="btn-restart" style="background: #ffcc00;">重新挑战</button>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const GAME_STATES = { MENU: 0, COUNTDOWN: 1, RACING: 2, FINISHED: 3 };
+        let currentGameState = GAME_STATES.MENU;
+
+        const TOTAL_LAPS = 3; 
+        const ROAD_WIDTH = 26; 
+        const HALF_ROAD = ROAD_WIDTH * 0.5;
+        let raceStartTime = 0;
+
+        const keys = { w: false, a: false, s: false, d: false, space: false };
+        // 如果你的按键前后反了（按后车向前），把下面改为 true
+        const CONTROLS_REVERSED = true;
+
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        
+        scene.background = new THREE.Color(0xaaccff);
+        scene.fog = new THREE.FogExp2(0xaaccff, 0.003);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(renderer.domElement);
+
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambientLight);
+
+        const sunLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        sunLight.position.set(80, 150, 60);
+        sunLight.castShadow = true;
+        sunLight.shadow.mapSize.width = 2048;
+        sunLight.shadow.mapSize.height = 2048;
+        sunLight.shadow.camera.near = 0.5;
+        sunLight.shadow.camera.far = 500;
+        const d = 180;
+        sunLight.shadow.camera.left = -d; sunLight.shadow.camera.right = d;
+        sunLight.shadow.camera.top = d; sunLight.shadow.camera.bottom = -d;
+        scene.add(sunLight);
+
+        const trackPoints = [
+            new THREE.Vector3(0, 0, 0),
+            new THREE.Vector3(80, 0, 40),
+            new THREE.Vector3(160, 0, 10),
+            new THREE.Vector3(220, 0, 80),
+            new THREE.Vector3(180, 0, 190),
+            new THREE.Vector3(80, 0, 150),
+            new THREE.Vector3(0, 0, 240),
+            new THREE.Vector3(-100, 0, 170),
+            new THREE.Vector3(-160, 0, 70),
+            new THREE.Vector3(-80, 0, -40)
+        ];
+        trackPoints.forEach(p => p.multiplyScalar(2.2));
+        const trackCurve = new THREE.CatmullRomCurve3(trackPoints, true);
+        // 是否让 AI 仅设置位置与朝向（非物理驱动），更稳定但不受碰撞物理影响
+        const AI_USE_KINEMATIC = true;
+        const TRACK_LENGTH = trackCurve.getLength();
+
+        const collisionNodes = trackCurve.getPoints(1200);
+
+        const trackDivisions = 350;
+        const splinePoints = trackCurve.getPoints(trackDivisions);
+        
+        const roadGeo = new THREE.BufferGeometry();
+        const curbLGeo = new THREE.BufferGeometry();
+        const curbRGeo = new THREE.BufferGeometry();
+        
+        const roadVerts = [], roadIndices = [], roadUVs = [];
+        const curbLVerts = [], curbRVerts = [], curbLCols = [], curbRCols = [], curbIndices = [];
+
+        for (let i = 0; i <= trackDivisions; i++) {
+            const p = splinePoints[i % trackDivisions];
+            const nextP = splinePoints[(i + 1) % trackDivisions];
+            const tangent = new THREE.Vector3().subVectors(nextP, p).normalize();
+            const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+
+            const pL = p.clone().add(normal.clone().multiplyScalar(HALF_ROAD));
+            const pR = p.clone().sub(normal.clone().multiplyScalar(HALF_ROAD));
+            roadVerts.push(pL.x, 0.02, pL.z, pR.x, 0.02, pR.z);
+            roadUVs.push(0, i / 8, 1, i / 8);
+
+            const curbW = 1.8;
+            const pL_out = pL.clone().add(normal.clone().multiplyScalar(curbW));
+            const pR_out = pR.clone().sub(normal.clone().multiplyScalar(curbW));
+            
+            curbLVerts.push(pL.x, 0.15, pL.z, pL_out.x, 0.15, pL_out.z);
+            curbRVerts.push(pR_out.x, 0.15, pR_out.z, pR.x, 0.15, pR.z);
+
+            const isRed = (Math.floor(i / 2) % 2 === 0);
+            const col = isRed ? new THREE.Color(0xff2244) : new THREE.Color(0xffffff);
+            curbLCols.push(col.r, col.g, col.b, col.r, col.g, col.b);
+            curbRCols.push(col.r, col.g, col.b, col.r, col.g, col.b);
+        }
+
+        for (let i = 0; i < trackDivisions; i++) {
+            const ip = i * 2;
+            roadIndices.push(ip, ip + 1, ip + 2,  ip + 1, ip + 3, ip + 2);
+            curbIndices.push(ip, ip + 1, ip + 2,  ip + 1, ip + 3, ip + 2);
+        }
+
+        roadGeo.setAttribute('position', new THREE.Float32BufferAttribute(roadVerts, 3));
+        roadGeo.setAttribute('uv', new THREE.Float32BufferAttribute(roadUVs, 2));
+        roadGeo.setIndex(roadIndices);
+        roadGeo.computeVertexNormals();
+
+        const rCanvas = document.createElement('canvas');
+        rCanvas.width = 256; rCanvas.height = 256;
+        const rCtx = rCanvas.getContext('2d');
+        rCtx.fillStyle = '#44444c'; rCtx.fillRect(0, 0, 256, 256); 
+        rCtx.strokeStyle = '#ffcc00'; rCtx.lineWidth = 10; rCtx.setLineDash([40, 30]);
+        rCtx.beginPath(); rCtx.moveTo(128, 0); rCtx.lineTo(128, 256); rCtx.stroke(); 
+        rCtx.strokeStyle = '#ffffff'; rCtx.lineWidth = 6; rCtx.setLineDash([]);
+        rCtx.beginPath(); rCtx.moveTo(6, 0); rCtx.lineTo(6, 256); rCtx.moveTo(250, 0); rCtx.lineTo(250, 256); rCtx.stroke(); 
+        
+        const roadTxt = new THREE.CanvasTexture(rCanvas);
+        roadTxt.wrapS = THREE.RepeatWrapping; roadTxt.wrapT = THREE.RepeatWrapping;
+        const roadMesh = new THREE.Mesh(roadGeo, new THREE.MeshStandardMaterial({ map: roadTxt, roughness: 0.7 }));
+        roadMesh.receiveShadow = true;
+        scene.add(roadMesh);
+
+        function createCurbMesh(geo, verts, cols) {
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+            geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+            geo.setIndex(curbIndices);
+            geo.computeVertexNormals();
+            return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }));
+        }
+        const clM = createCurbMesh(curbLGeo, curbLVerts, curbLCols);
+        const crM = createCurbMesh(curbRGeo, curbRVerts, curbRCols);
+        scene.add(clM); scene.add(crM);
+
+        const finGeo = new THREE.BoxGeometry(ROAD_WIDTH, 0.05, 3);
+        const fCanvas = document.createElement('canvas'); fCanvas.width = 64; fCanvas.height = 64;
+        const fCtx = fCanvas.getContext('2d'); fCtx.fillStyle = '#fff'; fCtx.fillRect(0,0,64,64);
+        fCtx.fillStyle = '#000'; fCtx.fillRect(0,0,32,32); fCtx.fillRect(32,32,32,32);
+        const finTxt = new THREE.CanvasTexture(fCanvas); finTxt.wrapS = THREE.RepeatWrapping; finTxt.wrapT = THREE.RepeatWrapping; finTxt.repeat.set(8, 1);
+        const finMesh = new THREE.Mesh(finGeo, new THREE.MeshStandardMaterial({ map: finTxt }));
+        finMesh.position.copy(trackCurve.getPointAt(0));
+        finMesh.lookAt(finMesh.position.clone().add(trackCurve.getTangentAt(0)));
+        scene.add(finMesh);
+
+        const groundGeo = new THREE.PlaneGeometry(4000, 4000);
+        const gCanvas = document.createElement('canvas'); gCanvas.width = 128; gCanvas.height = 128;
+        const gCtx = gCanvas.getContext('2d');
+        gCtx.fillStyle = '#558a2f'; gCtx.fillRect(0, 0, 128, 128); 
+        gCtx.fillStyle = '#689f38'; gCtx.fillRect(0, 0, 64, 64); gCtx.fillRect(64, 64, 64, 64); 
+        const groundTxt = new THREE.CanvasTexture(gCanvas);
+        groundTxt.wrapS = THREE.RepeatWrapping; groundTxt.wrapT = THREE.RepeatWrapping; groundTxt.repeat.set(160, 160);
+        const ground = new THREE.Mesh(groundGeo, new THREE.MeshStandardMaterial({ map: groundTxt, roughness: 0.9 }));
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        const treeLeaves = new THREE.ConeGeometry(3.5, 9, 4);
+        const treeTrunk = new THREE.CylinderGeometry(0.6, 0.6, 3);
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x2e7d32, roughness: 0.8 });
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5d4037 });
+
+        for (let i = 0; i < trackDivisions; i += 2) {
+            const p = splinePoints[i];
+            const tangent = trackCurve.getTangentAt(i / trackDivisions).normalize();
+            const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+            const side = (i % 4 < 2) ? 1 : -1;
+            const dist = HALF_ROAD + 6 + Math.random() * 12;
+
+            const tGroup = new THREE.Group();
+            const lm = new THREE.Mesh(treeLeaves, leafMat); lm.position.y = 6.5; lm.castShadow = true;
+            const tm = new THREE.Mesh(treeTrunk, trunkMat); tm.position.y = 1.5; tm.castShadow = true;
+            tGroup.add(lm, tm);
+            tGroup.position.copy(p).add(normal.multiplyScalar(side * dist));
+            scene.add(tGroup);
+        }
+
+        class CarEntity {
+            constructor(name, bodyColor, isPlayer = false) {
+                this.name = name;
+                this.color = bodyColor;
+                this.isPlayer = isPlayer;
+
+                this.pos = new THREE.Vector3();
+                this.angle = 0;
+                this.speed = 0;
+                this.velocity = new THREE.Vector3();
+                
+                this.progress = 0; 
+                this.lap = 1;
+                this.progressInLap = 0;
+                this.finished = false;
+                this.finalTimeStr = "-";
+
+                this.aiBaseSpeedScale = 0.92 + Math.random() * 0.10; 
+                this.aiLaneDeviation = (Math.random() - 0.5) * 8; 
+
+                this.mesh = new THREE.Group();
+                const bMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.5, roughness: 0.3 });
+                const carBody = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.75, 4.2), bMat);
+                carBody.position.y = 0.5;
+                carBody.castShadow = true;
+                this.mesh.add(carBody);
+
+                const wing = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.15, 0.8), bMat);
+                wing.position.set(0, 1.4, -1.8); wing.castShadow = true;
+                const suppL = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.7, 0.3), bMat); suppL.position.set(-1.0, 0.9, -1.8);
+                const suppR = suppL.clone(); suppR.position.x = 1.0;
+                this.mesh.add(wing, suppL, suppR);
+
+                const glass = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.5, 1.4), new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.1 }));
+                glass.position.set(0, 0.9, -0.1);
+                this.mesh.add(glass);
+
+                scene.add(this.mesh);
+                this.repositionOnGrid(0);
+            }
+
+            repositionOnGrid(gridIndex) {
+                this.speed = 0; 
+                this.velocity.set(0,0,0);
+                this.finished = false;
+                this.finalTimeStr = "-";
+
+                // 强制将起跑圈数与进度严格归零，防止边界线卡死判断
+                this.lap = 1;
+                this.progressInLap = 0.0;
+                this.progress = 0.0;
+
+                // 排位网格向后错开 (1.0 为终点线，往后退 0.99, 0.98 ...)
+                const startT = (1.0 - (gridIndex * 0.012) + 1.0) % 1.0;
+                const basePt = trackCurve.getPointAt(startT);
+                const tangent = trackCurve.getTangentAt(startT).normalize();
+                const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+                
+                const sideShift = (gridIndex % 2 === 0) ? 3.5 : -3.5;
+                this.pos.copy(basePt).add(normal.multiplyScalar(sideShift));
+                this.mesh.position.copy(this.pos);
+
+                // 强制修正车辆朝向（使其对齐赛道前进方向）
+                const lookAhead = this.pos.clone().add(tangent);
+                this.mesh.lookAt(lookAhead);
+                this.angle = this.mesh.rotation.y;
+            }
+
+            update(dt) {
+                if (currentGameState === GAME_STATES.MENU || currentGameState === GAME_STATES.COUNTDOWN) {
+                    return;
+                }
+
+                if (this.finished) {
+                    this.speed *= 0.94;
+                    this.pos.addScaledVector(trackCurve.getTangentAt(this.progress % 1.0).normalize(), this.speed * dt);
+                    this.mesh.position.copy(this.pos);
+                    return;
+                }
+
+                if (this.isPlayer) {
+                    this.drivePlayerPhysics(dt);
+                } else {
+                    this.driveAIWithRubberBanding(dt);
+                }
+
+                this.calculateTrackProgress();
+            }
+
+            drivePlayerPhysics(dt) {
+                const maxSpd = keys.space ? 54 : 44; 
+                const accelForce = 22;
+                const frictionDamp = 14;
+                const steerSensitivity = keys.space ? 3.4 : 2.2;
+
+                // 支持反向配置：当 CONTROLS_REVERSED 为 true 时，W/S 功能互换
+                const forwardKey = CONTROLS_REVERSED ? keys.s : keys.w;
+                const backKey = CONTROLS_REVERSED ? keys.w : keys.s;
+
+                if (forwardKey) {
+                    this.speed = Math.min(this.speed + accelForce * dt, maxSpd);
+                } else if (backKey) {
+                    this.speed = Math.max(this.speed - accelForce * dt, -maxSpd * 0.4);
+                } else {
+                    if (this.speed > 0) this.speed = Math.max(this.speed - frictionDamp * dt, 0);
+                    if (this.speed < 0) this.speed = Math.min(this.speed + frictionDamp * dt, 0);
+                }
+
+                if (Math.abs(this.speed) > 1) {
+                    const revMult = this.speed > 0 ? 1 : -1;
+                    // 当 CONTROLS_REVERSED 为 true 时交换左右键
+                    const leftKey = CONTROLS_REVERSED ? keys.d : keys.a;
+                    const rightKey = CONTROLS_REVERSED ? keys.a : keys.d;
+                    if (leftKey) this.angle += steerSensitivity * dt * revMult;
+                    if (rightKey) this.angle -= steerSensitivity * dt * revMult;
+                }
+
+                this.mesh.rotation.y = this.angle;
+                const headingVector = new THREE.Vector3(0, 0, -1).applyAxisAngle(new THREE.Vector3(0, 1, 0), this.angle);
+
+                if (keys.space && Math.abs(this.speed) > 18 && (keys.a || keys.d)) {
+                    createSkidParticle(this.pos, this.color);
+                    const splineTangent = trackCurve.getTangentAt(this.progress % 1.0).normalize();
+                    headingVector.lerp(splineTangent, 0.16); 
+                }
+
+                this.velocity.copy(headingVector).multiplyScalar(this.speed * dt);
+                this.pos.add(this.velocity);
+
+                this.enforceBoundaryWall();
+                this.mesh.position.copy(this.pos);
+
+                updateCameraFollow();
+            }
+
+            driveAIWithRubberBanding(dt) {
+                // 更稳定的非物理驱动模式：直接根据赛道进度设置位置和朝向
+                if (AI_USE_KINEMATIC) {
+                    const player = participants[0];
+                    const progressDiff = this.progress - player.progress;
+
+                    let rubberBandFactor = 1.0;
+                    if (progressDiff < -0.10) {
+                        rubberBandFactor = THREE.MathUtils.lerp(1.0, 1.45, Math.min(Math.abs(progressDiff) * 3, 1.0));
+                    } else if (progressDiff > 0.06) {
+                        rubberBandFactor = THREE.MathUtils.lerp(1.0, 0.70, Math.min(progressDiff * 4, 1.0));
+                    }
+
+                    const cruiseSpeed = 38 * this.aiBaseSpeedScale * rubberBandFactor;
+
+                    // 将线速度转换为沿曲线的进度变化（单位：圈进度）
+                    const deltaDist = cruiseSpeed * dt; // 物理速度近似值
+                    const deltaProgress = deltaDist / TRACK_LENGTH; 
+
+                    // 更新进度并处理圈数
+                    let newProgressInLap = this.progressInLap + deltaProgress;
+                    if (newProgressInLap >= 1.0) {
+                        newProgressInLap -= 1.0;
+                        this.lap++;
+                        if (this.lap > TOTAL_LAPS && !this.finished) {
+                            this.triggerCrossFinishLine();
+                        }
+                    }
+                    this.progressInLap = newProgressInLap;
+                    this.progress = (this.lap - 1) + this.progressInLap;
+
+                    // 计算位置与偏移车道
+                    const tgtT = this.progressInLap % 1.0;
+                    const tgtPt = trackCurve.getPointAt(tgtT);
+                    const tg = trackCurve.getTangentAt(tgtT).normalize();
+                    const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+                    const laneOffsetPt = tgtPt.clone().add(nm.multiplyScalar(this.aiLaneDeviation));
+
+                    this.pos.copy(laneOffsetPt);
+                    this.mesh.position.copy(this.pos);
+
+                    // 对齐朝向到切线方向
+                    const lookAhead = this.pos.clone().add(tg);
+                    this.mesh.lookAt(lookAhead);
+                    this.angle = this.mesh.rotation.y;
+                    this.speed = cruiseSpeed; // 保持视觉上一致的速度值
+                    return;
+                }
+
+                // 旧的基于位置移动的实现（保留以备回滚）
+                const lookAheadStep = 0.035; 
+                const currentT = (this.progress / TOTAL_LAPS) % 1.0;
+                const forwardT = (currentT + lookAheadStep) % 1.0;
+                const lookTargetPt = trackCurve.getPointAt(forwardT);
+                
+                const tg = trackCurve.getTangentAt(forwardT).normalize();
+                const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+                lookTargetPt.add(nm.multiplyScalar(this.aiLaneDeviation));
+
+                const steerDirectionVec = lookTargetPt.clone().sub(this.pos);
+                steerDirectionVec.y = 0;
+                
+                const targetDistance = steerDirectionVec.length();
+                
+                const player2 = participants[0];
+                const progressDiff2 = this.progress - player2.progress; 
+
+                let rubberBandFactor2 = 1.0;
+                if (progressDiff2 < -0.10) { 
+                    rubberBandFactor2 = THREE.MathUtils.lerp(1.0, 1.45, Math.min(Math.abs(progressDiff2) * 3, 1.0));
+                } else if (progressDiff2 > 0.06) {
+                    rubberBandFactor2 = THREE.MathUtils.lerp(1.0, 0.70, Math.min(progressDiff2 * 4, 1.0));
+                }
+
+                const cruiseSpeed2 = 38 * this.aiBaseSpeedScale * rubberBandFactor2;
+                
+                const currentCurveTangent = trackCurve.getTangentAt(currentT);
+                const angleDelta = currentCurveTangent.angleTo(tg);
+                const curveSlowingFactor = Math.max(0.65, 1.0 - angleDelta * 2.2);
+
+                this.speed = THREE.MathUtils.lerp(this.speed, cruiseSpeed2 * curveSlowingFactor, 3 * dt);
+
+                if (targetDistance > 0.4) {
+                    steerDirectionVec.normalize();
+                    this.pos.addScaledVector(steerDirectionVec, this.speed * dt);
+                    this.mesh.position.copy(this.pos);
+
+                    const targetYaw = Math.atan2(steerDirectionVec.x, steerDirectionVec.z) + Math.PI;
+                    let angleDiff = targetYaw - this.angle;
+                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                    
+                    this.angle += angleDiff * 5 * dt;
+                    this.mesh.rotation.y = this.angle;
+                }
+            }
+
+            enforceBoundaryWall() {
+                let nearestSplinePoint = null; let minD = Infinity;
+                for (let i = 0; i < collisionNodes.length; i++) {
+                    const dist = this.pos.distanceTo(collisionNodes[i]);
+                    if (dist < minD) { minD = dist; nearestSplinePoint = collisionNodes[i]; }
+                }
+                if (!nearestSplinePoint) return;
+
+                const lateralOffsetVec = new THREE.Vector3().subVectors(this.pos, nearestSplinePoint);
+                lateralOffsetVec.y = 0;
+                const distanceVal = lateralOffsetVec.length();
+                const safeRadius = HALF_ROAD - 1.6; 
+
+                if (distanceVal > safeRadius) {
+                    const wallNormalVector = lateralOffsetVec.clone().normalize();
+                    this.pos.copy(nearestSplinePoint).add(wallNormalVector.clone().multiplyScalar(safeRadius));
+                    const normalSpeedComponent = this.velocity.dot(wallNormalVector);
+                    if (normalSpeedComponent > 0) this.speed *= -0.4; 
+                }
+            }
+
+            calculateTrackProgress() {
+                let closestT = 0; let minDist = Infinity;
+                const currentTGuess = (this.progress / TOTAL_LAPS) % 1.0;
+                const scanRange = 0.15; const samples = 30;
+
+                for (let i = 0; i < samples; i++) {
+                    const t = (currentTGuess - scanRange + (i / samples) * scanRange * 2 + 1.0) % 1.0;
+                    const testPt = trackCurve.getPointAt(t);
+                    const d = this.pos.distanceTo(testPt);
+                    if (d < minDist) { minDist = d; closestT = t; }
+                }
+
+                const lastProgressInLap = this.progressInLap;
+                this.progressInLap = closestT;
+
+                // 防止在发车格原地错判跨线
+                if (currentGameState === GAME_STATES.RACING) {
+                    if (lastProgressInLap > 0.85 && this.progressInLap < 0.15) {
+                        this.lap++;
+                        if (this.lap > TOTAL_LAPS && !this.finished) this.triggerCrossFinishLine();
+                    } else if (lastProgressInLap < 0.15 && this.progressInLap > 0.85 && this.lap > 1) {
+                        this.lap--; 
+                    }
+                }
+                this.progress = (this.lap - 1) + this.progressInLap;
+            }
+
+            triggerCrossFinishLine() {
+                this.finished = true;
+                const duration = (performance.now() - raceStartTime) / 1000;
+                this.finalTimeStr = `${duration.toFixed(2)}s`;
+                if (this.isPlayer) setTimeout(() => { showEndRaceSummary(); }, 1500);
+            }
+        }
+
+        const participants = [
+            new CarEntity("Player 玩家 (你)", 0xff2255, true),
+            new CarEntity("AI 闪电", 0x00ccff, false),
+            new CarEntity("AI 幽灵", 0x4caf50, false),
+            new CarEntity("AI 烈焰", 0xffaa00, false)
+        ];
+
+        // 彻底修复反向问题：正确的后置视角渲染（增加 Math.PI 抵消车头初始偏角）
+        function updateCameraFollow() {
+            const player = participants[0];
+            const targetRotation = player.angle + Math.PI; 
+            const backCamOffset = new THREE.Vector3(0, 4.2, 10.5).applyAxisAngle(new THREE.Vector3(0, 1, 0), targetRotation);
+            
+            camera.position.lerp(player.pos.clone().add(backCamOffset), 0.1);
+            camera.lookAt(player.pos.clone().add(new THREE.Vector3(0, 0.8, 2).applyAxisAngle(new THREE.Vector3(0, 1, 0), targetRotation)));
+        }
+
+        const skidParticles = [];
+        function createSkidParticle(pos, col) {
+            const pGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+            const pMat = new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.8 });
+            const mesh = new THREE.Mesh(pGeo, pMat);
+            mesh.position.set(pos.x + (Math.random()-0.5), 0.06, pos.z + (Math.random()-0.5));
+            scene.add(mesh);
+            skidParticles.push({ mesh: mesh, life: 1.0 });
+        }
+
+        function handleParticlesAging(dt) {
+            for (let i = skidParticles.length - 1; i >= 0; i--) {
+                const p = skidParticles[i]; p.life -= dt * 2.8; p.mesh.scale.multiplyScalar(0.93); p.mesh.material.opacity = p.life;
+                if (p.life <= 0) { scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose(); skidParticles.splice(i, 1); }
+            }
+        }
+
+        const lblPos = document.getElementById('lbl-pos');
+        const lblLap = document.getElementById('lbl-lap');
+        const lblSpeed = document.getElementById('lbl-speed');
+        const liveRankingPanel = document.getElementById('live-ranking');
+
+        function updateLiveLeaderboard() {
+            const sortedGroup = [...participants].sort((a, b) => b.progress - a.progress);
+            const playerObj = participants[0];
+            const playerRank = sortedGroup.findIndex(c => c.isPlayer) + 1;
+
+            if (!playerObj.finished) {
+                lblPos.innerText = `${playerRank} / ${participants.length}`;
+                lblLap.innerText = `${Math.min(playerObj.lap, TOTAL_LAPS)} / ${TOTAL_LAPS}`;
+                lblSpeed.innerText = Math.round(Math.abs(playerObj.speed) * 3.4); 
+            }
+
+            let htmlStr = "<div style='color:#000;border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:6px;'>当前排位</div>";
+            sortedGroup.forEach((car, index) => {
+                const isPl = car.isPlayer ? "class='rank-player'" : "";
+                const lapText = car.finished ? "已完赛" : `第 ${Math.min(car.lap, TOTAL_LAPS)} 圈`;
+                htmlStr += `<div class="rank-item"><span ${isPl}>${index + 1}. ${car.name}</span> - <small>${lapText}</small></div>`;
+            });
+            liveRankingPanel.innerHTML = htmlStr;
+        }
+
+        const mapCanvas = document.getElementById('minimap');
+        const mapCtx = mapCanvas.getContext('2d');
+
+        function renderMinimap() {
+            mapCtx.clearRect(0, 0, mapCanvas.width, mapCanvas.height);
+
+            const mapScale = 0.14; 
+            const offsetX = 80; 
+            const offsetZ = 75;
+
+            const transformCoords = (vec3) => {
+                return {
+                    x: offsetX + vec3.x * mapScale,
+                    y: offsetZ + vec3.z * mapScale
+                };
+            };
+
+            mapCtx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            mapCtx.lineWidth = 4;
+            mapCtx.lineCap = 'round';
+            mapCtx.lineJoin = 'round';
+            mapCtx.beginPath();
+
+            const miniMapPoints = trackCurve.getPoints(100);
+            const startPt = transformCoords(miniMapPoints[0]);
+            mapCtx.moveTo(startPt.x, startPt.y);
+
+            for (let i = 1; i < miniMapPoints.length; i++) {
+                const nextPt = transformCoords(miniMapPoints[i]);
+                mapCtx.lineTo(nextPt.x, nextPt.y);
+            }
+            mapCtx.closePath();
+            mapCtx.stroke();
+
+            participants.forEach(car => {
+                const screenPos = transformCoords(car.pos);
+                mapCtx.fillStyle = car.isPlayer ? '#ff2255' : '#' + car.color.toString(16).padStart(6, '0');
+                mapCtx.beginPath();
+                const dotRadius = car.isPlayer ? 5 : 3.5;
+                mapCtx.arc(screenPos.x, screenPos.y, dotRadius, 0, Math.PI * 2);
+                mapCtx.fill();
+
+                if (car.isPlayer) {
+                    mapCtx.strokeStyle = '#ffffff';
+                    mapCtx.lineWidth = 1.5;
+                    mapCtx.stroke();
+                }
+            });
+        }
+
+        const startScreen = document.getElementById('start-screen');
+        const endScreen = document.getElementById('end-screen');
+        const hudView = document.getElementById('hud');
+        const minimapCont = document.getElementById('minimap-container');
+        const countdownLabel = document.getElementById('countdown');
+
+        document.getElementById('btn-start').addEventListener('click', () => {
+            startScreen.classList.add('hidden');
+            beginRaceSequence();
+        });
+
+        document.getElementById('btn-restart').addEventListener('click', () => {
+            endScreen.classList.add('hidden');
+            participants.forEach((car, index) => car.repositionOnGrid(index));
+            beginRaceSequence();
+        });
+
+        function beginRaceSequence() {
+            currentGameState = GAME_STATES.COUNTDOWN;
+            hudView.classList.remove('hidden');
+            minimapCont.classList.remove('hidden');
+            liveRankingPanel.classList.remove('hidden');
+            countdownLabel.classList.remove('hidden');
+            
+            let val = 3;
+            countdownLabel.innerText = val;
+
+            // 初始立刻对齐低位后视跟随相机
+            updateCameraFollow();
+
+            const intervalId = setInterval(() => {
+                val--;
+                if (val > 0) {
+                    countdownLabel.innerText = val;
+                } else if (val === 0) {
+                    countdownLabel.innerText = "GO!";
+                    countdownLabel.style.color = "#ff2255";
+                    raceStartTime = performance.now();
+                    currentGameState = GAME_STATES.RACING;
+                } else {
+                    clearInterval(intervalId);
+                    countdownLabel.classList.add('hidden');
+                    countdownLabel.style.color = "#ffcc00"; 
+                }
+            }, 1000);
+        }
+
+        function showEndRaceSummary() {
+            currentGameState = GAME_STATES.FINISHED;
+            hudView.classList.add('hidden');
+            minimapCont.classList.add('hidden');
+            liveRankingPanel.classList.add('hidden');
+            endScreen.classList.remove('hidden');
+
+            const finalRanks = [...participants].sort((a, b) => b.progress - a.progress);
+            const tbody = document.querySelector('#final-table tbody');
+            tbody.innerHTML = "";
+
+            finalRanks.forEach((car, index) => {
+                const rowStyle = car.isPlayer ? "class='row-player'" : "";
+                let timeDisplay = car.finalTimeStr;
+                if (timeDisplay === "-") {
+                    timeDisplay = car.finished ? `${((performance.now() - raceStartTime)/1000 - Math.random()).toFixed(2)}s` : "未完赛 (DNF)";
+                }
+                tbody.innerHTML += `<tr ${rowStyle}><td>${index + 1}</td><td>${car.name}</td><td>${timeDisplay}</td></tr>`;
+            });
+        }
+
+        const onKeyEvent = (e, isPressed) => {
+            switch (e.key.toLowerCase()) {
+                case 'w': case 'arrowup': keys.w = isPressed; break;
+                case 'a': case 'arrowleft': keys.a = isPressed; break;
+                case 's': case 'arrowdown': keys.s = isPressed; break;
+                case 'd': case 'arrowright': keys.d = isPressed; break;
+                case ' ': keys.space = isPressed; break;
+            }
+        };
+        window.addEventListener('keydown', (e) => onKeyEvent(e, true));
+        window.addEventListener('keyup', (e) => onKeyEvent(e, false));
+
+        // 触屏与指针事件支持：将界面按钮映射为与键盘相同的 `keys` 状态
+        (function setupTouchControls(){
+            const actionMap = { up: 'w', down: 's', left: 'a', right: 'd', space: 'space' };
+            const container = document.getElementById('touch-controls');
+            if(!container) return;
+
+            const setKey = (action, pressed) => {
+                const key = actionMap[action];
+                if(!key) return;
+                if(key === 'space') keys.space = pressed;
+                else keys[key] = pressed;
+            };
+
+            container.querySelectorAll('button[data-action]').forEach(btn => {
+                const act = btn.dataset.action;
+                // Touch events
+                btn.addEventListener('touchstart', (ev) => { ev.preventDefault(); setKey(act, true); }, { passive:false });
+                btn.addEventListener('touchend', (ev) => { ev.preventDefault(); setKey(act, false); }, { passive:false });
+                btn.addEventListener('touchcancel', () => setKey(act, false));
+
+                // Pointer events support (mouse, pen)
+                btn.addEventListener('pointerdown', (ev) => { ev.preventDefault(); setKey(act, true); });
+                btn.addEventListener('pointerup',   (ev) => { ev.preventDefault(); setKey(act, false); });
+                btn.addEventListener('pointerleave',() => setKey(act, false));
+            });
+
+            // 防止触摸在游戏区域造成滚动/缩放
+            ['touchstart','touchmove'].forEach(evtName => {
+                document.body.addEventListener(evtName, function(e){
+                    if(e.target && e.target.closest && e.target.closest('#touch-controls')) e.preventDefault();
+                }, { passive:false });
+            });
+        })();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        const clock = new THREE.Clock();
+
+        // 场景未点击开始时的俯瞰观察机位
+        camera.position.set(0, 150, 160);
+        camera.lookAt(0, 0, 70);
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const dt = Math.min(clock.getDelta(), 0.1);
+
+            participants.forEach(car => car.update(dt));
+
+            if (currentGameState === GAME_STATES.COUNTDOWN || currentGameState === GAME_STATES.RACING) {
+                updateCameraFollow();
+            }
+
+            handleParticlesAging(dt);
+
+            if (currentGameState === GAME_STATES.RACING || currentGameState === GAME_STATES.COUNTDOWN) {
+                updateLiveLeaderboard();
+                renderMinimap();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        animate();
+    </script>
+</body>
+</html>
