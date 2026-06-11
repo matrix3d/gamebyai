@@ -270,6 +270,8 @@
         <div class="hud-card">排名: <span class="hud-highlight" id="lbl-pos">1/4</span></div>
         <div class="hud-card">圈数: <span class="hud-highlight" id="lbl-lap">1/3</span></div>
         <div class="hud-card"><span class="hud-highlight" id="lbl-speed">0</span> KM/H</div>
+        <div class="hud-card">🪙 <span class="hud-highlight" id="lbl-coins">0</span></div>
+        <div class="hud-card" id="boost-card" style="display:none;background:#ffcc00;border-color:#ff6600;">⚡ <span id="lbl-boost">加速中!</span></div>
     </div>
 
     <!-- 触屏控制区（移动端可见） -->
@@ -298,11 +300,11 @@
             <h1>Moja Grand Prix</h1>
             <p>高清明亮街机风・智能动态缠斗 AI 赛车</p>
             <div class="controls-guide">
-                <strong>操纵档位说明：</strong><br>
-                • <b>W 键 / ⬆ 方向键</b> ：猛踩油门加速<br>
-                • <b>S 键 / ⬇ 方向键</b> ：踩刹车减速 / 倒车<br>
-                • <b>A, D 键 / ⬅, ➡ 键</b> ：左右精准打方向<br>
-                • <b>SPACE 空格键</b> ：过弯时按住，触发华丽侧滑漂移
+                <strong>操纵说明：</strong><br>
+                • <b>W / ⬆</b> ：油门加速 &nbsp; <b>S / ⬇</b> ：刹车/倒车<br>
+                • <b>A, D / ⬅, ➡</b> ：左右转向<br>
+                • <b>SPACE</b> ：漂移<br>
+                • 🪙 <b>金币</b>：捡起积分 &nbsp; ⚡ <b>闪电</b>：吃了加速！
             </div>
             <button class="btn" id="btn-start">开始竞速</button>
         </div>
@@ -384,8 +386,6 @@
         ];
         trackPoints.forEach(p => p.multiplyScalar(2.2));
         const trackCurve = new THREE.CatmullRomCurve3(trackPoints, true);
-        // 是否让 AI 仅设置位置与朝向（非物理驱动），更稳定但不受碰撞物理影响
-        const AI_USE_KINEMATIC = true;
         const TRACK_LENGTH = trackCurve.getLength();
 
         const collisionNodes = trackCurve.getPoints(1200);
@@ -493,13 +493,14 @@
             const tangent = trackCurve.getTangentAt(i / trackDivisions).normalize();
             const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
             const side = (i % 4 < 2) ? 1 : -1;
-            const dist = HALF_ROAD + 6 + Math.random() * 12;
+            // 确保树在路外：最近也要比路宽+安全边距更远
+            const dist = HALF_ROAD + 8 + Math.random() * 18;
 
             const tGroup = new THREE.Group();
             const lm = new THREE.Mesh(treeLeaves, leafMat); lm.position.y = 6.5; lm.castShadow = true;
             const tm = new THREE.Mesh(treeTrunk, trunkMat); tm.position.y = 1.5; tm.castShadow = true;
             tGroup.add(lm, tm);
-            tGroup.position.copy(p).add(normal.multiplyScalar(side * dist));
+            tGroup.position.copy(p).add(normal.clone().multiplyScalar(side * dist));
             scene.add(tGroup);
         }
 
@@ -520,8 +521,13 @@
                 this.finished = false;
                 this.finalTimeStr = "-";
 
-                this.aiBaseSpeedScale = 0.92 + Math.random() * 0.10; 
-                this.aiLaneDeviation = (Math.random() - 0.5) * 8; 
+                this.aiBaseSpeedScale = 0.90 + Math.random() * 0.16; 
+                this.aiLaneDeviation = (Math.random() - 0.5) * 10;
+                // 新增 AI 个性参数
+                this.aiCornerBrake = 1.5 + Math.random() * 2.0;    // 弯道刹车激进度
+                this.aiWeavingSpeed = 0.4 + Math.random() * 0.8;   // 车道摆动频率
+                this.aiWeavingAmp   = 2.0 + Math.random() * 4.0;   // 车道摆动幅度
+                this.aiLaneDrift    = Math.random() * Math.PI * 2;  // 初始相位随机
 
                 this.mesh = new THREE.Group();
                 const bMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.5, roughness: 0.3 });
@@ -550,12 +556,7 @@
                 this.finished = false;
                 this.finalTimeStr = "-";
 
-                // 强制将起跑圈数与进度严格归零，防止边界线卡死判断
-                this.lap = 1;
-                this.progressInLap = 0.0;
-                this.progress = 0.0;
-
-                // 排位网格向后错开 (1.0 为终点线，往后退 0.99, 0.98 ...)
+                // 排位网格向后错开
                 const startT = (1.0 - (gridIndex * 0.012) + 1.0) % 1.0;
                 const basePt = trackCurve.getPointAt(startT);
                 const tangent = trackCurve.getTangentAt(startT).normalize();
@@ -565,10 +566,15 @@
                 this.pos.copy(basePt).add(normal.multiplyScalar(sideShift));
                 this.mesh.position.copy(this.pos);
 
-                // 强制修正车辆朝向（使其对齐赛道前进方向）
+                // 朝向对齐赛道前进方向
                 const lookAhead = this.pos.clone().add(tangent);
                 this.mesh.lookAt(lookAhead);
                 this.angle = this.mesh.rotation.y;
+
+                // 进度与实际位置一致，避免 AI 第一帧从 t=startT 瞬跳到 t=0
+                this.lap = 1;
+                this.progressInLap = startT;
+                this.progress = startT;
             }
 
             update(dt) {
@@ -585,20 +591,20 @@
 
                 if (this.isPlayer) {
                     this.drivePlayerPhysics(dt);
+                    this.calculateTrackProgress(); // 只有玩家需要从位置反算进度
                 } else {
-                    this.driveAIWithRubberBanding(dt);
+                    this.driveAIWithRubberBanding(dt); // AI 自己维护进度，不需要反算
                 }
-
-                this.calculateTrackProgress();
             }
 
             drivePlayerPhysics(dt) {
-                const maxSpd = keys.space ? 54 : 44; 
-                const accelForce = 22;
-                const frictionDamp = 14;
-                const steerSensitivity = keys.space ? 3.4 : 2.2;
+                const boostActive = boostTimer > 0;
+                const boostM = boostActive ? BOOST_MULT : 1.0;
+                const maxSpd = (keys.space ? 200 : 160) * boostM; 
+                const accelForce = 75 * boostM;
+                const frictionDamp = 35;
+                const steerSensitivity = keys.space ? 3.0 : 2.5;
 
-                // 支持反向配置：当 CONTROLS_REVERSED 为 true 时，W/S 功能互换
                 const forwardKey = CONTROLS_REVERSED ? keys.s : keys.w;
                 const backKey = CONTROLS_REVERSED ? keys.w : keys.s;
 
@@ -613,7 +619,6 @@
 
                 if (Math.abs(this.speed) > 1) {
                     const revMult = this.speed > 0 ? 1 : -1;
-                    // 当 CONTROLS_REVERSED 为 true 时交换左右键
                     const leftKey = CONTROLS_REVERSED ? keys.d : keys.a;
                     const rightKey = CONTROLS_REVERSED ? keys.a : keys.d;
                     if (leftKey) this.angle += steerSensitivity * dt * revMult;
@@ -639,145 +644,133 @@
             }
 
             driveAIWithRubberBanding(dt) {
-                // 更稳定的非物理驱动模式：直接根据赛道进度设置位置和朝向
-                if (AI_USE_KINEMATIC) {
-                    const player = participants[0];
-                    const progressDiff = this.progress - player.progress;
+                const player = participants[0];
+                const progressDiff = this.progress - player.progress;
 
-                    let rubberBandFactor = 1.0;
-                    if (progressDiff < -0.10) {
-                        rubberBandFactor = THREE.MathUtils.lerp(1.0, 1.45, Math.min(Math.abs(progressDiff) * 3, 1.0));
-                    } else if (progressDiff > 0.06) {
-                        rubberBandFactor = THREE.MathUtils.lerp(1.0, 0.70, Math.min(progressDiff * 4, 1.0));
-                    }
-
-                    const cruiseSpeed = 38 * this.aiBaseSpeedScale * rubberBandFactor;
-
-                    // 将线速度转换为沿曲线的进度变化（单位：圈进度）
-                    const deltaDist = cruiseSpeed * dt; // 物理速度近似值
-                    const deltaProgress = deltaDist / TRACK_LENGTH; 
-
-                    // 更新进度并处理圈数
-                    let newProgressInLap = this.progressInLap + deltaProgress;
-                    if (newProgressInLap >= 1.0) {
-                        newProgressInLap -= 1.0;
-                        this.lap++;
-                        if (this.lap > TOTAL_LAPS && !this.finished) {
-                            this.triggerCrossFinishLine();
-                        }
-                    }
-                    this.progressInLap = newProgressInLap;
-                    this.progress = (this.lap - 1) + this.progressInLap;
-
-                    // 计算位置与偏移车道
-                    const tgtT = this.progressInLap % 1.0;
-                    const tgtPt = trackCurve.getPointAt(tgtT);
-                    const tg = trackCurve.getTangentAt(tgtT).normalize();
-                    const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
-                    const laneOffsetPt = tgtPt.clone().add(nm.multiplyScalar(this.aiLaneDeviation));
-
-                    this.pos.copy(laneOffsetPt);
-                    this.mesh.position.copy(this.pos);
-
-                    // 对齐朝向到切线方向
-                    const lookAhead = this.pos.clone().add(tg);
-                    this.mesh.lookAt(lookAhead);
-                    this.angle = this.mesh.rotation.y;
-                    this.speed = cruiseSpeed; // 保持视觉上一致的速度值
-                    return;
+                // ── 橡皮筋系数 ──
+                let rubberBandFactor = 1.0;
+                if (progressDiff < -0.12) {
+                    rubberBandFactor = THREE.MathUtils.lerp(1.0, 1.55, Math.min(Math.abs(progressDiff) * 4, 1.0));
+                } else if (progressDiff < -0.05) {
+                    rubberBandFactor = THREE.MathUtils.lerp(1.0, 1.20, Math.abs(progressDiff) * 8);
+                } else if (progressDiff > 0.08) {
+                    rubberBandFactor = THREE.MathUtils.lerp(1.0, 0.75, Math.min(progressDiff * 5, 1.0));
                 }
 
-                // 旧的基于位置移动的实现（保留以备回滚）
-                const lookAheadStep = 0.035; 
-                const currentT = (this.progress / TOTAL_LAPS) % 1.0;
-                const forwardT = (currentT + lookAheadStep) % 1.0;
-                const lookTargetPt = trackCurve.getPointAt(forwardT);
-                
-                const tg = trackCurve.getTangentAt(forwardT).normalize();
+                // ── 弯道感知减速 ──
+                const tCurrent = this.progressInLap % 1.0;
+                const tAhead = (tCurrent + 0.04) % 1.0;
+                const tgCurrent = trackCurve.getTangentAt(tCurrent);
+                const tgAhead = trackCurve.getTangentAt(tAhead);
+                const curvature = tgCurrent.angleTo(tgAhead);
+                const cornerFactor = Math.max(0.72, 1.0 - curvature * this.aiCornerBrake);
+
+                // ── AI 基础速度 = 参考玩家当前速度，保持竞争 ──
+                const playerSpeed = Math.abs(participants[0].speed);
+                const refSpeed = Math.max(80, playerSpeed); // 至少80，不会因玩家减速而完全停下
+                const baseSpeed = refSpeed * this.aiBaseSpeedScale;
+                const targetSpeed = baseSpeed * rubberBandFactor * cornerFactor;
+                // 平滑加速：lerp 系数固定，不依赖 targetSpeed 大小
+                this.speed += (targetSpeed - this.speed) * Math.min(1.0, 4.0 * dt);
+
+                // ── 推进进度 ──
+                const deltaProgress = (Math.abs(this.speed) * dt) / TRACK_LENGTH;
+                let newPIL = this.progressInLap + deltaProgress;
+                if (newPIL >= 1.0) {
+                    newPIL -= 1.0;
+                    this.lap++;
+                    if (this.lap > TOTAL_LAPS && !this.finished) this.triggerCrossFinishLine();
+                }
+                this.progressInLap = newPIL;
+                this.progress = (this.lap - 1) + this.progressInLap;
+
+                // ── 动态车道漫游（平滑正弦，无突变） ──
+                this.aiLaneDrift = (this.aiLaneDrift || 0) + dt * this.aiWeavingSpeed;
+                const dynamicLane = this.aiLaneDeviation + Math.sin(this.aiLaneDrift) * this.aiWeavingAmp;
+                const clampedLane = Math.max(-HALF_ROAD * 0.65, Math.min(HALF_ROAD * 0.65, dynamicLane));
+
+                // ── 定位 ──
+                const tgtT = this.progressInLap % 1.0;
+                const tgtPt = trackCurve.getPointAt(tgtT);
+                const tg = trackCurve.getTangentAt(tgtT).normalize();
                 const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
-                lookTargetPt.add(nm.multiplyScalar(this.aiLaneDeviation));
+                this.pos.copy(tgtPt.clone().add(nm.multiplyScalar(clampedLane)));
+                this.mesh.position.copy(this.pos);
 
-                const steerDirectionVec = lookTargetPt.clone().sub(this.pos);
-                steerDirectionVec.y = 0;
-                
-                const targetDistance = steerDirectionVec.length();
-                
-                const player2 = participants[0];
-                const progressDiff2 = this.progress - player2.progress; 
+                // ── 朝向：平滑插值角度，避免每帧抖动 ──
+                const targetYaw = Math.atan2(tg.x, tg.z);
+                let angleDiff = targetYaw - this.angle;
+                while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+                while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+                this.angle += angleDiff * Math.min(1.0, 8.0 * dt);
+                this.mesh.rotation.y = this.angle;
 
-                let rubberBandFactor2 = 1.0;
-                if (progressDiff2 < -0.10) { 
-                    rubberBandFactor2 = THREE.MathUtils.lerp(1.0, 1.45, Math.min(Math.abs(progressDiff2) * 3, 1.0));
-                } else if (progressDiff2 > 0.06) {
-                    rubberBandFactor2 = THREE.MathUtils.lerp(1.0, 0.70, Math.min(progressDiff2 * 4, 1.0));
-                }
+                // ── 弯道漂移粒子 ──
+                if (curvature > 0.18 && Math.random() < 0.06) createSkidParticle(this.pos, this.color);
+                return; // new AI done
 
-                const cruiseSpeed2 = 38 * this.aiBaseSpeedScale * rubberBandFactor2;
-                
-                const currentCurveTangent = trackCurve.getTangentAt(currentT);
-                const angleDelta = currentCurveTangent.angleTo(tg);
-                const curveSlowingFactor = Math.max(0.65, 1.0 - angleDelta * 2.2);
-
-                this.speed = THREE.MathUtils.lerp(this.speed, cruiseSpeed2 * curveSlowingFactor, 3 * dt);
-
-                if (targetDistance > 0.4) {
-                    steerDirectionVec.normalize();
-                    this.pos.addScaledVector(steerDirectionVec, this.speed * dt);
-                    this.mesh.position.copy(this.pos);
-
-                    const targetYaw = Math.atan2(steerDirectionVec.x, steerDirectionVec.z) + Math.PI;
-                    let angleDiff = targetYaw - this.angle;
-                    while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
-                    while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
-                    
-                    this.angle += angleDiff * 5 * dt;
-                    this.mesh.rotation.y = this.angle;
-                }
             }
 
             enforceBoundaryWall() {
-                let nearestSplinePoint = null; let minD = Infinity;
-                for (let i = 0; i < collisionNodes.length; i++) {
-                    const dist = this.pos.distanceTo(collisionNodes[i]);
-                    if (dist < minD) { minD = dist; nearestSplinePoint = collisionNodes[i]; }
+                // 粗采样找最近赛道中心点（全圈64点，保证不会漏掉）
+                let bestT = 0; let minD = Infinity;
+                const COARSE = 64;
+                for (let i = 0; i < COARSE; i++) {
+                    const t = i / COARSE;
+                    const d = this.pos.distanceTo(trackCurve.getPointAt(t));
+                    if (d < minD) { minD = d; bestT = t; }
                 }
-                if (!nearestSplinePoint) return;
+                // 精采样：在找到的 bestT 附近再细化
+                for (let i = -20; i <= 20; i++) {
+                    const t = (bestT + i / (COARSE * 20) + 1.0) % 1.0;
+                    const d = this.pos.distanceTo(trackCurve.getPointAt(t));
+                    if (d < minD) { minD = d; bestT = t; }
+                }
+                const nearestPt = trackCurve.getPointAt(bestT);
 
-                const lateralOffsetVec = new THREE.Vector3().subVectors(this.pos, nearestSplinePoint);
-                lateralOffsetVec.y = 0;
-                const distanceVal = lateralOffsetVec.length();
-                const safeRadius = HALF_ROAD - 1.6; 
+                const toWall = new THREE.Vector3().subVectors(this.pos, nearestPt);
+                toWall.y = 0;
+                const dist = toWall.length();
+                const safeR = HALF_ROAD - 2.0;
 
-                if (distanceVal > safeRadius) {
-                    const wallNormalVector = lateralOffsetVec.clone().normalize();
-                    this.pos.copy(nearestSplinePoint).add(wallNormalVector.clone().multiplyScalar(safeRadius));
-                    const normalSpeedComponent = this.velocity.dot(wallNormalVector);
-                    if (normalSpeedComponent > 0) this.speed *= -0.4; 
+                if (dist > safeR) {
+                    const wallN = toWall.clone().normalize();
+                    // 推回边界内
+                    this.pos.copy(nearestPt).add(wallN.clone().multiplyScalar(safeR));
+
+                    // 滑动：消除速度的法向分量，保留切向（沿墙滑行不停车）
+                    const vDotN = this.velocity.dot(wallN);
+                    if (vDotN > 0) {
+                        this.velocity.addScaledVector(wallN, -vDotN);
+                        this.velocity.multiplyScalar(0.88);
+                        this.speed *= 0.88;
+                    }
                 }
             }
 
             calculateTrackProgress() {
-                let closestT = 0; let minDist = Infinity;
-                const currentTGuess = (this.progress / TOTAL_LAPS) % 1.0;
-                const scanRange = 0.15; const samples = 30;
-
+                // 用更宽的扫描范围（±0.25），防止高速或弯道时错过最近点
+                let closestT = this.progressInLap; let minDist = Infinity;
+                const samples = 60;
+                const scanRange = 0.25;
                 for (let i = 0; i < samples; i++) {
-                    const t = (currentTGuess - scanRange + (i / samples) * scanRange * 2 + 1.0) % 1.0;
-                    const testPt = trackCurve.getPointAt(t);
-                    const d = this.pos.distanceTo(testPt);
+                    const t = (this.progressInLap - scanRange + (i / samples) * scanRange * 2 + 1.0) % 1.0;
+                    const d = this.pos.distanceTo(trackCurve.getPointAt(t));
                     if (d < minDist) { minDist = d; closestT = t; }
                 }
 
-                const lastProgressInLap = this.progressInLap;
+                const lastT = this.progressInLap;
                 this.progressInLap = closestT;
 
-                // 防止在发车格原地错判跨线
                 if (currentGameState === GAME_STATES.RACING) {
-                    if (lastProgressInLap > 0.85 && this.progressInLap < 0.15) {
+                    // 过终点线：从圈末(>0.85)跨到圈头(<0.15)
+                    if (lastT > 0.85 && this.progressInLap < 0.15) {
                         this.lap++;
                         if (this.lap > TOTAL_LAPS && !this.finished) this.triggerCrossFinishLine();
-                    } else if (lastProgressInLap < 0.15 && this.progressInLap > 0.85 && this.lap > 1) {
-                        this.lap--; 
+                    }
+                    // 防止倒车时误判
+                    else if (lastT < 0.15 && this.progressInLap > 0.85 && this.lap > 1) {
+                        this.lap--;
                     }
                 }
                 this.progress = (this.lap - 1) + this.progressInLap;
@@ -792,10 +785,10 @@
         }
 
         const participants = [
-            new CarEntity("Player 玩家 (你)", 0xff2255, true),
-            new CarEntity("AI 闪电", 0x00ccff, false),
-            new CarEntity("AI 幽灵", 0x4caf50, false),
-            new CarEntity("AI 烈焰", 0xffaa00, false)
+            new CarEntity("🔴 玩家 (你)", 0xff2255, true),
+            new CarEntity("⚡ 闪电侠", 0x00ccff, false),
+            new CarEntity("👻 幽灵车", 0x4caf50, false),
+            new CarEntity("🔥 烈焰王", 0xffaa00, false)
         ];
 
         // 彻底修复反向问题：正确的后置视角渲染（增加 Math.PI 抵消车头初始偏角）
@@ -838,7 +831,7 @@
             if (!playerObj.finished) {
                 lblPos.innerText = `${playerRank} / ${participants.length}`;
                 lblLap.innerText = `${Math.min(playerObj.lap, TOTAL_LAPS)} / ${TOTAL_LAPS}`;
-                lblSpeed.innerText = Math.round(Math.abs(playerObj.speed) * 3.4); 
+                lblSpeed.innerText = Math.round(Math.abs(playerObj.speed) * 1.8); 
             }
 
             let htmlStr = "<div style='color:#000;border-bottom:2px solid #000;padding-bottom:3px;margin-bottom:6px;'>当前排位</div>";
@@ -914,6 +907,7 @@
         document.getElementById('btn-restart').addEventListener('click', () => {
             endScreen.classList.add('hidden');
             participants.forEach((car, index) => car.repositionOnGrid(index));
+            resetPickups();
             beginRaceSequence();
         });
 
@@ -1020,6 +1014,155 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         });
 
+        // ══════════════════════════════════════════════
+        // 金币 & 加速道具系统
+        // ══════════════════════════════════════════════
+        let playerCoins = 0;
+        let boostTimer = 0;        // 剩余加速时间（秒）
+        const BOOST_DURATION = 4;  // 加速持续秒数
+        const BOOST_MULT = 1.7;    // 加速倍率
+
+        const coinMeshes   = [];   // { mesh, t, active }
+        const boostMeshes  = [];   // { mesh, t, active }
+
+        // 金币几何（小圆柱竖放）
+        const coinGeo   = new THREE.CylinderGeometry(1.2, 1.2, 0.35, 12);
+        const coinMat   = new THREE.MeshStandardMaterial({ color: 0xffd700, metalness: 0.9, roughness: 0.2, emissive: 0xffaa00, emissiveIntensity: 0.4 });
+        // 加速道具（八面体，发光蓝紫）
+        const boostGeo  = new THREE.OctahedronGeometry(1.5);
+        const boostMat  = new THREE.MeshStandardMaterial({ color: 0x00eeff, metalness: 0.5, roughness: 0.1, emissive: 0x0088ff, emissiveIntensity: 0.8 });
+
+        function spawnPickups() {
+            // 每隔约 3% 圈放一枚金币，共约33枚；每隔约8%放一个加速
+            const coinStep   = 0.030;
+            const boostStep  = 0.085;
+
+            for (let t = 0; t < 1.0; t += coinStep) {
+                const pt = trackCurve.getPointAt(t);
+                const tg = trackCurve.getTangentAt(t).normalize();
+                const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+                // 放在赛道中央左右随机偏移
+                const offset = (Math.random() - 0.5) * (HALF_ROAD * 0.9);
+                const mesh = new THREE.Mesh(coinGeo, coinMat.clone());
+                mesh.position.copy(pt).add(nm.multiplyScalar(offset));
+                mesh.position.y = 1.2;
+                mesh.rotation.x = Math.PI / 2; // 竖放，面朝玩家
+                scene.add(mesh);
+                coinMeshes.push({ mesh, t, active: true });
+            }
+
+            for (let t = 0.04; t < 1.0; t += boostStep) {
+                const pt = trackCurve.getPointAt(t);
+                const tg = trackCurve.getTangentAt(t).normalize();
+                const nm = new THREE.Vector3(-tg.z, 0, tg.x).normalize();
+                const offset = (Math.random() - 0.5) * (HALF_ROAD * 0.7);
+                const mesh = new THREE.Mesh(boostGeo, boostMat.clone());
+                mesh.position.copy(pt).add(nm.multiplyScalar(offset));
+                mesh.position.y = 1.8;
+                scene.add(mesh);
+                boostMeshes.push({ mesh, t, active: true });
+            }
+        }
+        spawnPickups();
+
+        // 金币飞行动画列表（DOM 动画）
+        const flyingCoins = [];
+        function spawnFlyingCoin(worldPos) {
+            // 把 3D 坐标投影到屏幕
+            const projected = worldPos.clone().project(camera);
+            const sx = (projected.x *  0.5 + 0.5) * window.innerWidth;
+            const sy = (-projected.y * 0.5 + 0.5) * window.innerHeight;
+
+            const el = document.createElement('div');
+            el.textContent = '🪙';
+            el.style.cssText = `position:fixed;left:${sx}px;top:${sy}px;font-size:22px;pointer-events:none;z-index:99;transition:none;`;
+            document.body.appendChild(el);
+            flyingCoins.push({ el, sx, sy, progress: 0 });
+        }
+
+        function updateFlyingCoins(dt) {
+            // 金币 HUD 目标位置
+            const coinCard = document.getElementById('lbl-coins');
+            const rect = coinCard ? coinCard.getBoundingClientRect() : { left: 80, top: 12 };
+            const tx = rect.left + rect.width / 2;
+            const ty = rect.top  + rect.height / 2;
+
+            for (let i = flyingCoins.length - 1; i >= 0; i--) {
+                const fc = flyingCoins[i];
+                fc.progress = Math.min(1, fc.progress + dt * 2.2);
+                const t = fc.progress;
+                // 抛物线飞行
+                const cx = fc.sx + (tx - fc.sx) * t;
+                const cy = fc.sy + (ty - fc.sy) * t - Math.sin(t * Math.PI) * 60;
+                const scale = 1 + Math.sin(t * Math.PI) * 0.5;
+                fc.el.style.left = cx + 'px';
+                fc.el.style.top  = cy + 'px';
+                fc.el.style.transform = `scale(${scale}) translate(-50%,-50%)`;
+                fc.el.style.opacity = t > 0.85 ? (1 - (t - 0.85) / 0.15) : 1;
+                if (fc.progress >= 1) {
+                    document.body.removeChild(fc.el);
+                    flyingCoins.splice(i, 1);
+                    playerCoins++;
+                    document.getElementById('lbl-coins').textContent = playerCoins;
+                    // 金币数字闪一下
+                    const card = document.getElementById('lbl-coins').parentElement;
+                    card.style.background = '#ffd700';
+                    setTimeout(() => card.style.background = '', 300);
+                }
+            }
+        }
+
+        function updatePickups(dt, player) {
+            const COIN_R  = 4.5;
+            const BOOST_R = 5.0;
+
+            // 金币旋转 + 碰撞
+            coinMeshes.forEach(item => {
+                if (!item.active) return;
+                item.mesh.rotation.y += dt * 2.5;
+                if (player.pos.distanceTo(item.mesh.position) < COIN_R) {
+                    // 拾取
+                    item.active = false;
+                    item.mesh.visible = false;
+                    spawnFlyingCoin(item.mesh.position.clone());
+                }
+            });
+
+            // 加速道具旋转 + 碰撞
+            boostMeshes.forEach(item => {
+                if (!item.active) return;
+                item.mesh.rotation.y += dt * 3.5;
+                item.mesh.position.y = 1.8 + Math.sin(Date.now() * 0.003) * 0.4; // 漂浮
+                if (player.pos.distanceTo(item.mesh.position) < BOOST_R) {
+                    item.active = false;
+                    item.mesh.visible = false;
+                    boostTimer = BOOST_DURATION;
+                    // 显示加速HUD
+                    document.getElementById('boost-card').style.display = '';
+                }
+            });
+
+            // 加速计时
+            if (boostTimer > 0) {
+                boostTimer -= dt;
+                const lblBoost = document.getElementById('lbl-boost');
+                if (lblBoost) lblBoost.textContent = `加速 ${boostTimer.toFixed(1)}s`;
+                if (boostTimer <= 0) {
+                    boostTimer = 0;
+                    document.getElementById('boost-card').style.display = 'none';
+                }
+            }
+        }
+
+        function resetPickups() {
+            coinMeshes.forEach(item => { item.active = true; item.mesh.visible = true; });
+            boostMeshes.forEach(item => { item.active = true; item.mesh.visible = true; });
+            playerCoins = 0;
+            boostTimer = 0;
+            document.getElementById('lbl-coins').textContent = '0';
+            document.getElementById('boost-card').style.display = 'none';
+        }
+
         const clock = new THREE.Clock();
 
         // 场景未点击开始时的俯瞰观察机位
@@ -1038,6 +1181,11 @@
             }
 
             handleParticlesAging(dt);
+
+            if (currentGameState === GAME_STATES.RACING) {
+                updatePickups(dt, participants[0]);
+                updateFlyingCoins(dt);
+            }
 
             if (currentGameState === GAME_STATES.RACING || currentGameState === GAME_STATES.COUNTDOWN) {
                 updateLiveLeaderboard();
