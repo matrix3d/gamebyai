@@ -1,6 +1,8 @@
 # html5gameByAI
 
-<a href="https://matrix3d.github.io/gamebyai/minecraft.html">minecraft.html</a>  只用一个 HTML 文件,一次输出,直接做出一个完整的、可以玩的 Minecraft 克隆版
+<a href="https://matrix3d.github.io/gamebyai/minecraft.html">minecraft.html</a>  
+
+只用一个 HTML 文件,一次输出,直接做出一个完整的、可以玩的 Minecraft 克隆版。可以流畅在手机上操作适配。所以要加入虚拟摇杆之类的。加一个全屏按钮
 
 <a href="https://matrix3d.github.io/gamebyai/kimi3TanChiSHe.html">kimi3TanChiSHe.html</a>
 
