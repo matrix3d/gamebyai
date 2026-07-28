@@ -1,6 +1,6 @@
 # html5gameByAI
 
-<a href="https://matrix3d.github.io/gamebyai/gemini-car.html">kimi3TanChiSHe.html</a>
+<a href="https://matrix3d.github.io/gamebyai/kimi3TanChiSHe.html">kimi3TanChiSHe.html</a>
 
 <a href="https://matrix3d.github.io/gamebyai/gemini-car.html">gemini-car.html</a>
 
