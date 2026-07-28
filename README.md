@@ -1,5 +1,9 @@
 # html5gameByAI
 
+Minecraft
+
+<a href="https://matrix3d.github.io/gamebyai/minecraft.html">minecraft.html</a>
+
 <a href="https://matrix3d.github.io/gamebyai/kimi3TanChiSHe.html">kimi3TanChiSHe.html</a>
 
 <a href="https://matrix3d.github.io/gamebyai/gemini-car.html">gemini-car.html</a>
